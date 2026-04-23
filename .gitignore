@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.db
+*.db.tmp
+.env
+*.log
+debug-last-fetch.html
+startup-error.txt

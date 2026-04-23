@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Offscreen Scraper</title>
+  <!--
+    Warm the TCP + TLS handshake to amazon.co.jp before the first fetch
+    fires, so the first scrape of a session doesn't eat the ~100-400 ms
+    connection-setup cost. `use-credentials` is important: it causes the
+    preconnect to include the session cookies so Amazon's edge doesn't
+    have to re-establish a second connection for the credentialed fetch.
+  -->
+  <link rel="dns-prefetch" href="https://www.amazon.co.jp">
+  <link rel="preconnect"   href="https://www.amazon.co.jp" crossorigin="use-credentials">
+</head>
+<body>
+<script src="offscreen.js" type="module"></script>
+</body>
+</html>

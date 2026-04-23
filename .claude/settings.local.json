@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(node parser.test.mjs)",
+      "Bash(curl -sS -L --max-time 20 -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0.0.0 Safari/537.36' -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja-JP,ja;q=0.9,en;q=0.8' -H 'Accept-Encoding: gzip, deflate, br' -H 'Cache-Control: no-cache' 'https://www.amazon.co.jp/s?k=B08PTNSTT9&__mk_ja_JP=%E3%82%AB%E3%82%BF%E3%82%AB%E3%83%8A' --compressed -o c:/Users/Administrator/Music/amazon/test_jp_search.html -w 'HTTP %{http_code}, size %{size_download}, final_url %{url_effective}\\\\n')",
+      "Bash(awk 'NR>=2363 && NR<=2380' \"c:/Users/Administrator/Music/amazon/test_jp_search.html\")",
+      "Bash(node extract_jp_card.mjs)",
+      "Bash(rm -f cookies.txt)",
+      "Bash(curl -sS -L --max-time 20 -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0.0.0 Safari/537.36' -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja-JP,ja;q=0.9' -H 'Accept-Encoding: gzip, deflate, br' -c cookies.txt https://www.amazon.co.jp/ --compressed -o /dev/null -w 'HTTP %{http_code}, size %{size_download}\\\\n')",
+      "Bash(curl -sS -L --max-time 20 -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0.0.0 Safari/537.36' -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja-JP,ja;q=0.9' -H 'Accept-Encoding: gzip, deflate, br' -H 'Referer: https://www.amazon.co.jp/' -b cookies.txt -c cookies.txt 'https://www.amazon.co.jp/s?k=B08PTNSTT9' --compressed -o test_jp_search_v2.html -w 'HTTP %{http_code}, size %{size_download}, final_url %{url_effective}\\\\n')",
+      "Bash(curl -sS -L --max-time 20 -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0.0.0 Safari/537.36' -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja-JP,ja;q=0.9' -H 'Accept-Encoding: gzip, deflate, br' -H 'Referer: https://www.amazon.co.jp/' -b cookies.txt -c cookies.txt https://www.amazon.co.jp/dp/B08PTNSTT9 --compressed -o test_jp_detail.html -w 'HTTP %{http_code}, size %{size_download}, final_url %{url_effective}\\\\n')",
+      "Bash(curl -sS -L --max-time 20 -H 'User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/131.0.0.0 Safari/537.36' -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' -H 'Accept-Language: ja-JP,ja;q=0.9' -H 'Accept-Encoding: gzip, deflate, br' -H 'Cookie: i18n-prefs=JPY; lc-acbjp=ja_JP' https://www.amazon.co.jp/dp/B08PTNSTT9 --compressed -o test_jp_detail_jpy.html -w 'HTTP %{http_code}, size %{size_download}\\\\n')",
+      "Bash(grep -o '.\\\\{100\\\\}4,780.\\\\{100\\\\}' test_jp_detail_jpy.html)",
+      "Bash(find /c/Users/admin/Pictures/amazon -type f \\\\\\( -name \"*.js\" -o -name \"*.mjs\" \\\\\\) ! -path \"*/node_modules/*\" ! -path \"*/test/*\" -exec wc -l {} +)",
+      "Bash(docker compose:*)",
+      "Bash(node --check src/db/mysql.js)",
+      "Bash(node --check src/services/coordinator.js)",
+      "Bash(node --check src/services/evaluator.js)",
+      "Bash(node --check src/ws/handlers.js)",
+      "Bash(node --check src/api/observations.js)"
+    ]
+  }
+}

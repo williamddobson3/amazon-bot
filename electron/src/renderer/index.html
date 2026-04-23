@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=480, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' https://m.media-amazon.com https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https:;">
+  <title>Amazon Price Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app-view">
+
+<header id="header">
+  <div class="header-brand">
+    <h1>Price Monitor</h1>
+  </div>
+  <div id="status-bar">
+    <span id="status-indicator" class="status-dot offline"></span>
+    <span id="status-text">Stopped</span>
+    <span id="product-count" class="asin-badge">0 items</span>
+    <button id="btn-toggle-scraping" class="btn btn-primary btn-sm" title="Start / Stop">Start</button>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button class="tab active" data-tab="products">Products</button>
+  <button class="tab" data-tab="conditions">Alerts</button>
+  <button class="tab" data-tab="discord">Discord</button>
+  <button class="tab" data-tab="notifications">History</button>
+</nav>
+
+<!-- ── Products Tab ───────────────────────────────────────── -->
+<section id="tab-products" class="tab-content active">
+
+  <!-- CAPTCHA banner (hidden by default) -->
+  <div id="captcha-banner" class="captcha-banner hidden">
+    <div class="captcha-banner-icon">🛑</div>
+    <div class="captcha-banner-body">
+      <div class="captcha-banner-title" id="captcha-banner-title">Verification required</div>
+      <div class="captcha-banner-reason" id="captcha-banner-reason"></div>
+      <div class="captcha-banner-countdown">Pause ends in <span id="captcha-countdown">0:00</span></div>
+    </div>
+    <div class="captcha-banner-actions">
+      <button id="captcha-solve-btn" class="btn btn-primary btn-sm">Solve</button>
+    </div>
+  </div>
+
+  <!-- Cycle progress strip -->
+  <div id="cycle-progress" class="batch-progress hidden">
+    <div class="batch-progress-row">
+      <div class="batch-progress-label">
+        <span id="cycle-progress-title">Scraping</span>
+        <span id="cycle-progress-counts">0 / 0</span>
+      </div>
+      <div class="batch-progress-meta">
+        <span id="cycle-progress-wave"></span>
+      </div>
+    </div>
+    <div class="batch-progress-bar">
+      <div class="batch-progress-bar-fill" id="cycle-progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- Add ASINs form -->
+  <div class="form-group">
+    <textarea id="asin-input" rows="3" placeholder="Enter ASINs (one per line or comma-separated)"></textarea>
+    <div class="btn-row">
+      <button id="btn-add" class="btn btn-primary">Add ASINs</button>
+      <label class="btn btn-secondary">
+        Import CSV
+        <input type="file" id="csv-import" accept=".csv,.txt,.xlsx" class="hidden">
+      </label>
+    </div>
+    <div id="add-status" class="asin-status hidden"></div>
+  </div>
+
+  <!-- Product list header -->
+  <div id="product-list-header">
+    <span id="product-list-count">0 items</span>
+    <input type="text" id="product-search" placeholder="Search…">
+  </div>
+
+  <!-- Product list (virtual) -->
+  <div id="product-list" class="list-container">
+    <div id="product-list-sizer" class="virtual-sizer"></div>
+  </div>
+</section>
+
+<!-- ── Conditions Tab ─────────────────────────────────────── -->
+<section id="tab-conditions" class="tab-content">
+  <div class="form-group">
+    <select id="cond-type">
+      <option value="moving_avg_below_pct">Price below moving average by %</option>
+      <option value="absolute_price_below">Price below absolute value (¥)</option>
+      <option value="offer_count_drop_pct">Marketplace offer count drops by %</option>
+      <option value="marketplace_below">Marketplace price below value (¥)</option>
+    </select>
+    <div id="cond-params">
+      <input type="text"   id="cond-asin"     placeholder="ASIN (blank = all)">
+      <input type="number" id="cond-value"     placeholder="Value  e.g. 30">
+      <input type="number" id="cond-cooldown"  placeholder="Cooldown min" value="60">
+    </div>
+    <button id="btn-add-condition" class="btn btn-primary">Add Alert</button>
+  </div>
+  <div id="condition-list" class="list-container"></div>
+</section>
+
+<!-- ── Discord Tab ────────────────────────────────────────── -->
+<section id="tab-discord" class="tab-content">
+  <div class="form-group">
+    <label class="field-label-top">Webhook URL</label>
+    <input type="url" id="discord-url" placeholder="https://discord.com/api/webhooks/…">
+    <div class="btn-row">
+      <button id="btn-save-discord" class="btn btn-primary">Save</button>
+      <button id="btn-test-discord" class="btn btn-secondary">Test</button>
+    </div>
+  </div>
+  <div id="discord-status" class="hidden"></div>
+</section>
+
+<!-- ── Notifications Tab ──────────────────────────────────── -->
+<section id="tab-notifications" class="tab-content">
+  <div id="notification-list" class="list-container"></div>
+</section>
+
+</div><!-- /app-view -->
+
+<script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "name": "amazon-parser-test",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node parser.test.mjs"
+  },
+  "dependencies": {
+    "linkedom": "^0.18.5"
+  }
+}

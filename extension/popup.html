@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=600, initial-scale=1.0">
+  <title>Amazon Price Monitor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════
+     AUTH VIEW  (shown when not logged in)
+════════════════════════════════════════════════════════════ -->
+<div id="auth-view">
+  <div class="auth-bg-glow"></div>
+  <div class="auth-bg-grid"></div>
+
+  <!-- Hero -->
+  <div class="auth-hero">
+    <div class="auth-logo">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+        <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="#0a0a14" stroke-width="2.2" stroke-linejoin="round"/>
+        <polyline points="9 22 9 12 15 12 15 22" stroke="#0a0a14" stroke-width="2.2" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h1 class="auth-title">Price Monitor</h1>
+    <p class="auth-subtitle">Amazon.co.jp · Real-time tracking · Discord alerts</p>
+  </div>
+
+  <!-- Card -->
+  <div class="auth-card">
+
+    <!-- Tab pill switcher -->
+    <div class="auth-tabs" role="tablist">
+      <button class="auth-tab active" id="auth-tab-login" role="tab" aria-selected="true">Sign In</button>
+      <button class="auth-tab"        id="auth-tab-register" role="tab" aria-selected="false">Create Account</button>
+    </div>
+
+    <!-- ── LOGIN FORM ───────────────────────────────────────── -->
+    <form id="login-form" class="auth-form" novalidate autocomplete="on">
+
+      <div class="field-wrap" id="fw-login-email">
+        <div class="field-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+        </div>
+        <input type="email" id="login-email" name="email" autocomplete="email" placeholder=" " required>
+        <label for="login-email">Email address</label>
+        <p class="field-error" id="login-email-err" role="alert"></p>
+      </div>
+
+      <div class="field-wrap" id="fw-login-password">
+        <div class="field-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <input type="password" id="login-password" name="password" autocomplete="current-password" placeholder=" " required>
+        <label for="login-password">Password</label>
+        <button type="button" class="pw-toggle" data-for="login-password" aria-label="Toggle password visibility" tabindex="-1">
+          <svg class="eye-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <svg class="eye-closed hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+        </button>
+        <p class="field-error" id="login-password-err" role="alert"></p>
+      </div>
+
+      <p class="auth-general-error hidden" id="login-error" role="alert"></p>
+
+      <button type="submit" class="btn-auth" id="btn-sign-in">
+        <span class="btn-label">Sign In</span>
+        <span class="btn-spinner hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+        </span>
+        <span class="btn-check hidden">✓</span>
+      </button>
+    </form>
+
+    <!-- ── REGISTER FORM ─────────────────────────────────────── -->
+    <form id="register-form" class="auth-form hidden" novalidate autocomplete="on">
+
+      <div class="field-wrap" id="fw-reg-email">
+        <div class="field-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+            <polyline points="22,6 12,13 2,6"/>
+          </svg>
+        </div>
+        <input type="email" id="reg-email" name="email" autocomplete="email" placeholder=" " required>
+        <label for="reg-email">Email address</label>
+        <p class="field-error" id="reg-email-err" role="alert"></p>
+      </div>
+
+      <div class="field-wrap" id="fw-reg-password">
+        <div class="field-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <input type="password" id="reg-password" name="password" autocomplete="new-password" placeholder=" " required>
+        <label for="reg-password">Password</label>
+        <button type="button" class="pw-toggle" data-for="reg-password" aria-label="Toggle password visibility" tabindex="-1">
+          <svg class="eye-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <svg class="eye-closed hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+        </button>
+        <p class="field-error" id="reg-password-err" role="alert"></p>
+      </div>
+
+      <!-- Strength meter -->
+      <div class="pw-strength-wrap">
+        <div class="pw-strength-bar">
+          <div class="pw-strength-fill" id="pw-strength-fill"></div>
+        </div>
+        <span class="pw-strength-label" id="pw-strength-label">Enter a password</span>
+      </div>
+
+      <div class="field-wrap" id="fw-reg-confirm">
+        <div class="field-icon">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 12l2 2 4-4"/><rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <input type="password" id="reg-confirm" name="confirm" autocomplete="new-password" placeholder=" " required>
+        <label for="reg-confirm">Confirm password</label>
+        <button type="button" class="pw-toggle" data-for="reg-confirm" aria-label="Toggle password visibility" tabindex="-1">
+          <svg class="eye-open" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <svg class="eye-closed hidden" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+        </button>
+        <p class="field-error" id="reg-confirm-err" role="alert"></p>
+      </div>
+
+      <p class="auth-general-error hidden" id="register-error" role="alert"></p>
+
+      <button type="submit" class="btn-auth" id="btn-create-account">
+        <span class="btn-label">Create Account</span>
+        <span class="btn-spinner hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+        </span>
+        <span class="btn-check hidden">✓</span>
+      </button>
+    </form>
+
+  </div><!-- /auth-card -->
+</div><!-- /auth-view -->
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     APP VIEW  (shown when logged in)
+════════════════════════════════════════════════════════════ -->
+<div id="app-view" class="hidden">
+
+  <header id="header">
+    <div class="header-brand">
+      <div class="header-logo">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="#FF9900" stroke-width="2.2" stroke-linejoin="round"/>
+          <polyline points="9 22 9 12 15 12 15 22" stroke="#FF9900" stroke-width="2.2" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h1>Price Monitor</h1>
+    </div>
+    <div id="status-bar">
+      <span id="status-indicator" class="status-dot offline"></span>
+      <span id="status-text">Disconnected</span>
+      <span id="asin-count" class="asin-badge">0 ASINs</span>
+      <button id="btn-logout" title="Sign out" aria-label="Sign out">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <nav id="tabs">
+    <button class="tab active" data-tab="asins">ASINs</button>
+    <button class="tab" data-tab="conditions">Alerts</button>
+    <button class="tab" data-tab="discord">Discord</button>
+    <button class="tab" data-tab="notifications">History</button>
+  </nav>
+
+  <!-- ── ASIN Tab ─────────────────────────────────────────── -->
+  <section id="tab-asins" class="tab-content active">
+    <div class="form-group">
+      <textarea id="asin-input" rows="3" placeholder="Enter ASINs (one per line or comma-separated)"></textarea>
+      <div class="btn-row">
+        <button id="btn-add-asins" class="btn btn-primary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add ASINs
+        </button>
+        <label class="btn btn-secondary">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Import CSV
+          <input type="file" id="csv-import" accept=".csv,.txt" class="hidden">
+        </label>
+      </div>
+      <div id="asin-status" class="asin-status hidden"></div>
+    </div>
+    <!-- CAPTCHA / session pause banner (hidden when no pause is active) -->
+    <div id="captcha-banner" class="captcha-banner hidden">
+      <div class="captcha-banner-icon">🛑</div>
+      <div class="captcha-banner-body">
+        <div class="captcha-banner-title">Amazon verification required</div>
+        <div class="captcha-banner-reason" id="captcha-banner-reason">CAPTCHA</div>
+        <div class="captcha-banner-countdown">
+          Pause ends in <span id="captcha-banner-countdown">0:00</span>
+        </div>
+      </div>
+      <div class="captcha-banner-actions">
+        <button id="captcha-solve-btn" class="btn btn-primary btn-sm">Solve now</button>
+        <button id="captcha-skip-btn"  class="btn btn-secondary btn-sm">Skip pause</button>
+      </div>
+    </div>
+
+    <!-- Bulk-ingest batch progress strip (hidden when no batch is running) -->
+    <div id="batch-progress" class="batch-progress hidden">
+      <div class="batch-progress-row">
+        <div class="batch-progress-label">
+          <span id="batch-progress-title">Scraping</span>
+          <span id="batch-progress-counts">0 / 0</span>
+        </div>
+        <div class="batch-progress-meta">
+          <span id="batch-progress-eta"></span>
+          <button id="batch-progress-cancel" class="btn btn-danger btn-sm">Cancel</button>
+        </div>
+      </div>
+      <div class="batch-progress-bar">
+        <div class="batch-progress-bar-fill" id="batch-progress-fill"></div>
+      </div>
+      <div class="batch-progress-hint">Keep Chrome open — scrapes run from your browser session.</div>
+    </div>
+
+    <div id="asin-list-header">
+      <span id="asin-list-count">0 items</span>
+      <input type="text" id="asin-search" placeholder="Search ASINs…">
+    </div>
+    <div id="asin-list" class="list-container">
+      <div id="asin-list-sizer" class="virtual-sizer"></div>
+    </div>
+  </section>
+
+  <!-- ── Conditions Tab ───────────────────────────────────── -->
+  <section id="tab-conditions" class="tab-content">
+    <div class="form-group">
+      <select id="cond-type">
+        <option value="moving_avg_below_pct">Price below moving average by %</option>
+        <option value="absolute_price_below">Price below absolute value (¥)</option>
+        <option value="offer_count_drop_pct">Offer count drops by %</option>
+        <option value="marketplace_below">Marketplace price below value (¥)</option>
+      </select>
+      <div id="cond-params">
+        <input type="text"   id="cond-asin"     placeholder="ASIN (blank = all)">
+        <input type="number" id="cond-value"     placeholder="Value  e.g. 30">
+        <input type="number" id="cond-days"      placeholder="Days   e.g. 10" value="10">
+        <input type="number" id="cond-cooldown"  placeholder="Cooldown min" value="60">
+      </div>
+      <button id="btn-add-condition" class="btn btn-primary">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Alert
+      </button>
+      <p id="cond-msg" class="hidden" style="font-size:11.5px;margin-top:6px;padding:6px 8px;border-radius:5px;"></p>
+    </div>
+    <div id="condition-list" class="list-container"></div>
+  </section>
+
+  <!-- ── Discord Tab ───────────────────────────────────────── -->
+  <section id="tab-discord" class="tab-content">
+    <div class="discord-hero">
+      <div class="discord-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="#5865F2">
+          <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03z"/>
+        </svg>
+      </div>
+      <div>
+        <div class="discord-hero-title">Discord Notifications</div>
+        <div class="discord-hero-sub">Get instant price alerts in your server</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="field-label-top">Webhook URL</label>
+      <input type="url" id="discord-url" placeholder="https://discord.com/api/webhooks/…">
+      <div class="btn-row">
+        <button id="btn-save-discord" class="btn btn-primary">Save Webhook</button>
+        <button id="btn-test-discord" class="btn btn-secondary">Send Test</button>
+      </div>
+    </div>
+    <div id="discord-status" class="hidden"></div>
+  </section>
+
+  <!-- ── Notifications Tab ─────────────────────────────────── -->
+  <section id="tab-notifications" class="tab-content">
+    <div id="notification-list" class="list-container"></div>
+  </section>
+
+</div><!-- /app-view -->
+
+
+<!-- ═══════════════════════════════════════════════════════════
+     CHART MODAL  (price history per ASIN)
+════════════════════════════════════════════════════════════ -->
+<div id="chart-modal" class="hidden">
+  <div class="chart-backdrop" data-chart-close></div>
+
+  <div class="chart-card">
+    <header class="chart-head">
+      <div class="chart-head-text">
+        <div class="chart-title">📈 価格履歴</div>
+        <div class="chart-asin" id="chart-asin"></div>
+      </div>
+      <button class="chart-close" data-chart-close aria-label="閉じる">×</button>
+    </header>
+
+    <!-- Period selector -->
+    <div class="period-tabs" id="period-tabs">
+      <button data-period="1d">直近1日</button>
+      <button data-period="1w">直近1週間</button>
+      <button data-period="1m" class="active">直近1ヶ月</button>
+      <button data-period="3m">直近3か月</button>
+      <button data-period="1y">直近1年間</button>
+      <button data-period="all">全期間 (<span id="all-days">…</span>日)</button>
+    </div>
+
+    <!-- Status / empty state -->
+    <div class="chart-status" id="chart-status"></div>
+
+    <!-- The chart itself (rendered as pure SVG by popup.js) -->
+    <div class="chart-wrap">
+      <svg id="price-chart" viewBox="0 0 720 360" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+
+    <!-- Data table -->
+    <div class="chart-table-wrap">
+      <table id="price-table">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>販売価格</th>
+            <th>変動</th>
+            <th>ポイント</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Y-axis configuration sub-modal -->
+<div id="y-axis-modal" class="axis-modal hidden">
+  <div class="axis-modal-backdrop" data-axis-close="y"></div>
+  <div class="axis-modal-card">
+    <div class="axis-modal-title">縦軸の設定</div>
+    <label>
+      <span>最小値 (円)</span>
+      <input type="number" id="y-min" placeholder="例: 1000">
+    </label>
+    <label>
+      <span>最大値 (円)</span>
+      <input type="number" id="y-max" placeholder="例: 2000">
+    </label>
+    <label>
+      <span>目盛り間隔 (円)</span>
+      <input type="number" id="y-step" placeholder="例: 100">
+    </label>
+    <div class="axis-modal-actions">
+      <button id="y-axis-reset" class="btn btn-secondary btn-sm">自動</button>
+      <button id="y-axis-apply" class="btn btn-primary btn-sm">適用</button>
+    </div>
+  </div>
+</div>
+
+<!-- X-axis configuration sub-modal -->
+<div id="x-axis-modal" class="axis-modal hidden">
+  <div class="axis-modal-backdrop" data-axis-close="x"></div>
+  <div class="axis-modal-card">
+    <div class="axis-modal-title">横軸の設定</div>
+    <label>
+      <span>一番古い日</span>
+      <input type="date" id="x-start">
+    </label>
+    <label>
+      <span>最近の日</span>
+      <input type="date" id="x-end">
+    </label>
+    <label>
+      <span>分割日数</span>
+      <input type="number" id="x-divisions" placeholder="例: 7" min="2" max="30">
+    </label>
+    <div class="axis-modal-actions">
+      <button id="x-axis-reset" class="btn btn-secondary btn-sm">自動</button>
+      <button id="x-axis-apply" class="btn btn-primary btn-sm">適用</button>
+    </div>
+  </div>
+</div>
+
+<script src="popup.js" type="module"></script>
+</body>
+</html>

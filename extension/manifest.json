@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Amazon Price Monitor",
+  "version": "1.0.0",
+  "description": "Monitor Amazon.co.jp product prices and get Discord notifications on price drops",
+  "permissions": [
+    "offscreen",
+    "alarms",
+    "storage",
+    "unlimitedStorage",
+    "sidePanel",
+    "notifications",
+    "tabs",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "https://www.amazon.co.jp/*",
+    "https://discord.com/api/*",
+    "http://localhost/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Amazon Price Monitor"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "icons": {
+    "16": "icons/icon16.svg",
+    "48": "icons/icon16.svg",
+    "128": "icons/icon128.png"
+  }
+}
