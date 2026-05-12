@@ -45,13 +45,12 @@
 html, body {
   width: 100%;
   min-width: 320px;
-  height: 100%;
-  min-height: 100vh;
+  height: 100vh;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   color: var(--text);
   background: var(--bg);
-  overflow-x: hidden;
+  overflow: hidden;           /* no outer scrollbar — inner list scrolls instead */
   -webkit-font-smoothing: antialiased;
 }
 
@@ -394,7 +393,8 @@ html, body {
 #app-view {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;              /* lock to viewport — inner .list-container scrolls */
+  overflow: hidden;
   background: var(--bg);
 }
 
@@ -473,31 +473,19 @@ html, body {
 }
 
 /* ── Tab Nav ─────────────────────────────────────────────── */
-#tabs {
+/* The single main viewer view — replaces the old `.tab-content.active`.
+   min-height: 0 + overflow: hidden are mandatory in flex-column
+   layouts that hold a scroll container; without them the scroll
+   container's intrinsic content size breaks the parent's flex
+   allocation and the inner scrollbar disappears at scale. */
+.main-view {
   display: flex;
-  background: rgba(0,0,0,.3);
-  border-bottom: 1px solid rgba(255,255,255,.06);
-}
-.tab {
   flex: 1;
-  padding: 9px 4px;
-  background: none; border: none;
-  color: var(--text3);
-  font-size: 11.5px; font-weight: 600;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color .18s, border-color .18s;
-  letter-spacing: .1px;
+  flex-direction: column;
+  padding: 12px;
+  min-height: 0;
+  overflow: hidden;
 }
-.tab:hover  { color: var(--text2); }
-.tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-.tab-content { display: none; flex: 1; flex-direction: column; padding: 12px; }
-.tab-content.active { display: flex; }
 
 /* ── Forms (App) ─────────────────────────────────────────── */
 .form-group { margin-bottom: 12px; }
@@ -605,12 +593,13 @@ select option { background: var(--bg2); }
   background: rgba(255,255,255,.1); border-radius: 3px;
 }
 
-/* Virtualised list — an inner spacer holds total scroll height,
-   visible rows are absolutely positioned at their index × ROW_HEIGHT. */
+/* Virtualised list — an inner spacer holds total scroll height.
+   Visible rows are absolutely positioned by `rowOffsets[i]` so the
+   total list height is data-driven and compact/expanded rows can mix. */
 .virtual-sizer {
   position: relative;
   width: 100%;
-  min-height: 1px;   /* becomes rows.length × ROW_HEIGHT at runtime */
+  min-height: 1px;   /* becomes totalHeight at runtime (see recomputeOffsets) */
 }
 
 /* ── ASIN Card ────────────────────────────────────────────── */
@@ -623,16 +612,87 @@ select option { background: var(--bg2); }
 .asin-card:hover { background: rgba(255,255,255,.025); }
 .asin-card-pending { opacity: .75; }
 
-/* Virtualised-row variant — positioned absolutely inside the sizer
-   so the total list height is data-driven, not DOM-driven. */
+/* Virtualised-row base — positioned absolutely inside the sizer so the
+   total list height is data-driven, not DOM-driven. The compact and
+   expanded subclasses set their specific height (MUST match
+   COMPACT_HEIGHT / EXPANDED_HEIGHT in renderer.js). */
 .asin-card.virtual {
   position: absolute;
   left: 0;
   right: 0;
-  height: 220px;
-  padding: 11px 13px;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+/* Compact row — single line, ~48 px tall. Shows ASIN, title, current
+   price. Whole row is a click target → expand. Default state for every
+   newly-added product, which is what makes a 10k-item list fit in an
+   interactive UI instead of a 3 MP scroll marathon. */
+.asin-card.virtual.compact {
+  height: 48px;
+  padding: 0 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  transition: background .12s;
+}
+.asin-card.virtual.compact:hover {
+  background: rgba(255,255,255,.035);
+}
+.asin-compact-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.asin-compact-price {
+  flex-shrink: 0;
+  min-width: 72px;
+  text-align: right;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--price-color);
+  letter-spacing: -.2px;
+}
+
+/* Expanded card — full product detail, 280 px. Left-edge accent tells
+   the user which item they opened; only the header is a click target
+   for collapse (clicking on the body to read numbers shouldn't close
+   the card). */
+.asin-card.virtual.expanded {
+  height: 280px;
+  padding: 11px 13px;
+  cursor: default;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: rgba(255,255,255,.015);
+}
+.asin-card.virtual.expanded .asin-card-head {
+  cursor: pointer;
+}
+
+/* Small icon button — chart trigger in the expanded card header.
+   Sized to match btn-sm (height) but square-ish for glyph buttons. */
+.btn-icon {
+  padding: 3px 7px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 4px;
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: all .12s;
+}
+.btn-icon:hover {
+  background: rgba(255,255,255,.07);
+  color: var(--text);
+  border-color: rgba(255,255,255,.22);
 }
 
 /* Pending skeleton: the row exists, but no scrape result has landed yet.
@@ -724,6 +784,2253 @@ select option { background: var(--bg2); }
   flex-shrink: 0;
 }
 
+/* ── Tabular viewer ────────────────────────────────────────
+   Replaces the card-based product list. 21 columns of monitoring data
+   per row; the table scrolls horizontally inside its container so it
+   fits a narrow window without wrapping. Header row is sticky so it
+   stays visible during vertical scroll. */
+
+/* Top toolbar — everything the spec puts "ヘッダーのさらに上に".
+   Two rows: row 1 = settings / trash / group / import buttons;
+   row 2 = the always-visible bulk-action frame. */
+#viewer-top-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.vtb-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.vtb-left, .vtb-right {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Group filter block — vertical stack: dropdown on top, "N件表示" +
+   グループ名設定 button below. Per spec image: dropdown is wide enough
+   to show "すべて(275)" and full No.X group names + counts. */
+.group-filter-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+}
+#group-selector {
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #777;
+  border-radius: 4px;
+  color: #111;
+  font-size: 12.5px;
+  font-weight: 600;
+  width: 100%;
+  cursor: pointer;
+}
+/* Force the popup options to a light theme regardless of OS dark mode.
+   Chromium picks up <option> background/color in the native popup, but
+   without these the options inherit the surrounding dark theme and the
+   text becomes invisible against the dark popup chrome. */
+#group-selector option {
+  background: #ffffff;
+  color: #111111;
+}
+#group-selector option:checked,
+#group-selector option:hover {
+  background: #2563eb;
+  color: #ffffff;
+}
+.group-filter-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#group-filter-count {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .2px;
+  flex: 1;
+}
+.btn-group-rename {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 4px;
+  border: 1px solid #2563eb;
+  background: linear-gradient(180deg, #cfe2ff, #b6d4fe);
+  color: #1e3a8a;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: .2px;
+  transition: filter .12s, transform .12s;
+}
+.btn-group-rename:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+.btn-group-rename:active { transform: translateY(0); }
+/* フィルタ・通知・メンテナンス設定 — yellow/gold gradient.
+   Per spec image this button is the primary entry point into the
+   filter / notification / maintenance settings sheet, so it reads
+   as a prominent labelled tile rather than a generic secondary btn. */
+#btn-fnm-settings {
+  background: linear-gradient(180deg, #fde047, #f59e0b);
+  border: 1px solid #ca8a04;
+  color: #111111;
+  font-weight: 800;
+  font-size: 12px;
+  padding: 8px 14px;
+  letter-spacing: .3px;
+  border-radius: 5px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.35) inset, 0 2px 4px rgba(0,0,0,.18);
+  transition: filter .12s, transform .12s, box-shadow .12s;
+}
+#btn-fnm-settings:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+#btn-fnm-settings:active { transform: translateY(0); box-shadow: 0 1px 0 rgba(255,255,255,.35) inset; }
+
+/* ゴミ箱商品閲覧 — solid black tile with bold white label, contrasting
+   the yellow settings button. Active state inverts to red so the
+   user knows they're currently viewing the trash. */
+#btn-toggle-trash {
+  background: #000000;
+  border: 1px solid #1f2937;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 12px;
+  padding: 8px 14px;
+  letter-spacing: .3px;
+  border-radius: 5px;
+  box-shadow: 0 1px 0 rgba(255,255,255,.06) inset, 0 2px 4px rgba(0,0,0,.4);
+  transition: filter .12s, transform .12s, background .12s;
+}
+#btn-toggle-trash:hover {
+  filter: brightness(1.25);
+  transform: translateY(-1px);
+}
+#btn-toggle-trash:active { transform: translateY(0); }
+#btn-toggle-trash.active {
+  background: #b91c1c;
+  border-color: #7f1d1d;
+  color: #ffffff;
+}
+
+/* Bulk-action frame — always visible per spec. The 4 colored action
+   buttons live underneath the title/count line in a 2-column grid,
+   matching the spec mock (監視スタート / グループ登録 / エクスポート / 削除). */
+.bulk-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, rgba(255,153,0,.10), rgba(255,153,0,.02));
+  border: 1px solid rgba(255,153,0,.28);
+  border-radius: var(--r-sm);
+}
+.bulk-toolbar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bulk-toolbar-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: .3px;
+}
+.bulk-toolbar-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.bulk-toolbar-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, 156px);
+  justify-content: start;
+  gap: 8px;
+  width: 100%;
+}
+.bulk-toolbar-actions:empty::before {
+  grid-column: 1 / -1;
+  content: '✅した商品が無い場合は操作できません';
+  color: var(--text3);
+  font-size: 11px;
+  padding: 6px 8px;
+}
+.bulk-toolbar #bulk-clear {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.18);
+  color: var(--text2);
+  font-size: 10.5px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 4px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.bulk-toolbar #bulk-clear:hover {
+  background: rgba(255,255,255,.05);
+  border-color: rgba(255,255,255,.32);
+  color: var(--text);
+}
+
+/* ── Bulk-action 4 colored buttons ──────────────────────────
+   Match the spec mock: 監視スタート (green), グループ登録 (blue),
+   エクスポート (cyan), 削除 (red). Solid fill so the action
+   semantics read at a glance. */
+.bulk-action-btn {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: .3px;
+  transition: filter .12s, transform .12s, box-shadow .12s;
+  text-align: center;
+}
+.bulk-action-btn:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0,0,0,.28);
+}
+.bulk-action-btn:active { transform: translateY(0); box-shadow: none; }
+.bulk-action-btn:disabled,
+.bulk-action-btn[disabled] {
+  opacity: .35;
+  cursor: not-allowed;
+  filter: grayscale(.4);
+  transform: none;
+  box-shadow: none;
+}
+
+.bulk-action-start    { background: #16a34a; border-color: #15803d; }   /* 緑 */
+.bulk-action-group    { background: #2563eb; border-color: #1d4ed8; }   /* 青 */
+.bulk-action-export   { background: #06b6d4; border-color: #0891b2; }   /* 水色 */
+.bulk-action-delete   { background: #dc2626; border-color: #b91c1c; }   /* 赤 */
+.bulk-action-restore  { background: #0ea5e9; border-color: #0369a1; }   /* (trash) */
+.bulk-action-harddel  { background: #b91c1c; border-color: #7f1d1d; }   /* (trash) */
+
+/* While the scheduler is running, the bulk-toolbar collapses to a
+   single 監視ストップ button per spec. Stretch it across the full
+   row so it's an unmissable target. */
+.bulk-toolbar-actions-stopmode {
+  grid-template-columns: 1fr !important;
+  justify-content: stretch !important;
+}
+.bulk-action-stop {
+  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  border-color: #7f1d1d;
+  font-size: 14px;
+  padding: 12px 16px;
+  letter-spacing: .5px;
+  box-shadow: 0 0 18px rgba(220,38,38,.35);
+}
+.bulk-action-stop:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 0 24px rgba(220,38,38,.5);
+}
+.bulk-toolbar-head.hidden { display: none; }
+
+/* ── Generic modal (ASIN add, FNM settings) ────────────────── */
+.generic-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  background: rgba(4,4,14,.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.generic-modal.hidden { display: none; }
+.generic-modal-card {
+  background: linear-gradient(180deg, rgba(20,20,34,.99), rgba(14,14,24,.99));
+  border: 1px solid rgba(255,153,0,.3);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+}
+.generic-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.generic-modal-body {
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.generic-modal-body textarea {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--r-xs);
+  color: var(--text);
+  font-size: 12px;
+  resize: vertical;
+  min-height: 100px;
+  font-family: inherit;
+}
+.generic-modal-body textarea:focus {
+  outline: none;
+  border-color: var(--input-focus);
+}
+.generic-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 6px;
+}
+
+/* ── 監視対象のASINの追加インポート modal ──────────────────── */
+.csv-import-desc {
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+.csv-import-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 14px;
+}
+.csv-file-pick {
+  cursor: pointer;
+  font-weight: 600;
+}
+.csv-file-name {
+  font-size: 12px;
+  color: var(--text2);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.csv-import-rules {
+  font-size: 11px;
+  color: var(--text3);
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 4px;
+  padding: 8px 10px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+/* ── FNM settings modal (v2) ────────────────────────────────
+   Wide 2-pane layout: left frame holds condition controls
+   (出品者数 ranges + keyword search + legacy point conditions);
+   right frame holds saved filter slots (presets + customs). */
+.fnm-modal-card {
+  max-width: min(1080px, 96vw) !important;
+  width: 1040px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.fnm-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,.03), transparent);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.fnm-modal-title-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .5px;
+}
+.fnm-modal-hint {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.45;
+}
+.fnm-modal-close {
+  font-size: 18px;
+  color: var(--text3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 6px;
+}
+.fnm-modal-close:hover { color: var(--text); }
+
+.fnm-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fnm-2pane {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+.fnm-right-pane.hidden { display: none; }
+
+.fnm-left-pane,
+.fnm-right-pane {
+  background: rgba(255,255,255,.025);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: var(--r-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fnm-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(255,255,255,.08);
+}
+.fnm-apply-btn {
+  background: var(--accent);
+  color: #1a1208;
+  font-weight: 800;
+  padding: 6px 18px;
+  border-radius: 6px;
+  letter-spacing: .5px;
+}
+.fnm-apply-btn:hover { background: #ffae33; }
+.btn-ghost {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.10);
+  color: var(--text);
+}
+.btn-ghost:hover { background: rgba(255,255,255,.08); }
+.btn-cyan {
+  background: #34d3eb;
+  color: #062930;
+  border: none;
+  font-weight: 700;
+}
+.btn-cyan:hover { background: #5ce0f5; }
+.btn-warn {
+  background: var(--accent);
+  color: #1a1208;
+  border: none;
+  font-weight: 700;
+}
+.btn-warn:hover { background: #ffae33; }
+
+/* Section frames inside the left/right panes */
+.fnm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fnm-section-hint {
+  font-size: 10.5px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+
+/* 出品者数 range grid — 5 rows × { ☐ label [min] ~ [max] 人 } */
+.fnm-mpcount-grid,
+.fnm-droprate-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* 下落率 — same range row layout but each row has a sub-line below
+   showing the calculation formula per spec image. */
+.fnm-droprate-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 0;
+}
+.fnm-droprate-formula {
+  font-size: 10px;
+  color: var(--text3);
+  padding-left: 28px;
+  font-style: italic;
+  line-height: 1.3;
+}
+.fnm-range-row {
+  display: grid;
+  grid-template-columns: 18px minmax(120px, 1fr) 70px 14px 70px 18px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px;
+  font-size: 11.5px;
+}
+.fnm-range-label {
+  color: var(--text);
+  font-weight: 500;
+}
+.fnm-range-sep {
+  text-align: center;
+  color: var(--text2);
+}
+.fnm-range-suffix {
+  color: var(--text2);
+}
+
+/* Keyword grid — 4 rows × { ☐ label [text input] } */
+.fnm-keyword-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fnm-keyword-row {
+  display: grid;
+  grid-template-columns: 18px minmax(180px, auto) minmax(150px, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px;
+  font-size: 11.5px;
+}
+.fnm-keyword-label {
+  color: var(--text);
+  font-weight: 500;
+}
+.fnm-keyword-input {
+  padding: 5px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+  font-family: inherit;
+  min-width: 0;
+}
+.fnm-keyword-input:focus {
+  outline: none;
+  border-color: var(--input-focus);
+}
+
+/* Saved filter slot card (preset or custom) */
+.fnm-slot-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.fnm-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 8px 9px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+}
+.fnm-slot-title {
+  font-size: 10.5px;
+  color: var(--text2);
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: .4px;
+}
+.fnm-slot-name {
+  width: 100%;
+  padding: 5px 7px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+}
+.fnm-slot-name:focus {
+  outline: none;
+  border-color: var(--input-focus);
+}
+.fnm-slot-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+.fnm-slot-actions .btn { padding: 4px 14px; font-size: 11px; }
+.fnm-slot-foot {
+  font-size: 10px;
+  color: var(--text2);
+  margin-top: 2px;
+}
+
+/* おススメフィルタ — recommended preset cards. Show the full
+   condition list inline (label + range) so the user knows exactly
+   what 「適用」 will write into the left pane. */
+.fnm-slot-preset {
+  background: linear-gradient(180deg, rgba(255,153,0,.06), rgba(255,153,0,.02));
+  border-color: rgba(255,153,0,.2);
+}
+.fnm-slot-preset .fnm-slot-title {
+  color: var(--accent);
+  font-weight: 700;
+}
+.fnm-preset-rules {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 6px 8px;
+  background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.fnm-preset-rule {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.fnm-preset-rule-label {
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+}
+.fnm-preset-rule-range {
+  color: var(--accent);
+  font-family: "Consolas", "Courier New", monospace;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.fnm-preset-note {
+  font-size: 10px;
+  color: var(--text3);
+  font-style: italic;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+
+/* Custom-slot toggles — appear above the name input once the slot
+   has been saved at least once. Two checkboxes (通知 / 自動ゴミ捨て)
+   styled as compact pills so the slot stays roughly the same height
+   as before saving. */
+.fnm-slot-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  justify-content: center;
+}
+.fnm-slot-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text2);
+  padding: 2px 6px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  background: rgba(255,255,255,.03);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.fnm-slot-toggle input { margin: 0; cursor: pointer; }
+.fnm-slot-toggle:hover {
+  border-color: rgba(255,255,255,.22);
+  color: var(--text);
+}
+.fnm-slot-toggle:has(input:checked) {
+  border-color: rgba(104,211,145,.45);
+  background: rgba(104,211,145,.12);
+  color: #8feab3;
+}
+.fnm-slot-custom.is-saved {
+  border-color: rgba(104,211,145,.25);
+  background: rgba(104,211,145,.05);
+}
+
+.fnm-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255,255,255,.08);
+}
+
+/* FNM settings modal — 3 tabs × 20 condition slots */
+.fnm-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  margin: 0 -2px 4px;
+}
+.fnm-tab {
+  flex: 1;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color .12s, border-color .12s;
+}
+.fnm-tab:hover { color: var(--text); }
+.fnm-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.fnm-tab-desc {
+  font-size: 11px;
+  color: var(--text2);
+  padding: 4px 6px 8px;
+  line-height: 1.4;
+}
+.fnm-cond-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: var(--r-xs);
+}
+.fnm-cond-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  font-size: 11.5px;
+  color: var(--text);
+}
+.fnm-cond-list li:last-child { border-bottom: none; }
+.fnm-cond-list input[type="checkbox"] { cursor: pointer; flex-shrink: 0; }
+.fnm-cond-list .fnm-cond-label {
+  flex-shrink: 0;
+  width: 56px;
+  color: var(--text2);
+  font-weight: 600;
+}
+.fnm-cond-list .fnm-cond-text {
+  color: var(--text2);
+  font-size: 10.5px;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* TBD slots (no catalog entry yet) — italicised low-contrast hint. */
+.fnm-cond-list .fnm-cond-tbd .fnm-cond-text {
+  flex: 1;
+  color: var(--text3);
+  font-style: italic;
+}
+.fnm-cond-list .fnm-cond-tbd input { cursor: not-allowed; }
+
+/* Range inputs for parameterised conditions (条件1 ポイント範囲, 条件2
+   ポイント率範囲 …). Inline with the label and suffix so the row
+   reads naturally as a sentence: "ポイントが [____] pt 〜 [____] pt". */
+.fnm-cond-list .fnm-cond-input {
+  width: 64px;
+  padding: 4px 6px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  color: var(--text);
+  font-size: 11px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  flex-shrink: 0;
+  /* Hide native spinners for a cleaner look — users type the value. */
+  -moz-appearance: textfield;
+}
+.fnm-cond-list .fnm-cond-input::-webkit-outer-spin-button,
+.fnm-cond-list .fnm-cond-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.fnm-cond-list .fnm-cond-input:focus {
+  outline: none;
+  border-color: var(--input-focus);
+}
+.fnm-cond-list .fnm-cond-suffix,
+.fnm-cond-list .fnm-cond-sep {
+  font-size: 10.5px;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+
+/* Discord webhook section — appears only in the 通知設定 tab.
+   Shown via removing .hidden when the active tab is 'notif'. */
+.fnm-discord-section {
+  margin-top: 6px;
+  padding: 12px;
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: var(--r-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fnm-discord-section.hidden { display: none; }
+.fnm-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: .3px;
+}
+.fnm-discord-section input {
+  padding: 7px 10px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--r-xs);
+  color: var(--text);
+  font-size: 11.5px;
+  font-family: "Consolas", monospace;
+}
+.fnm-discord-section input:focus {
+  outline: none;
+  border-color: var(--input-focus);
+}
+
+/* Outer scroll container — horizontal + vertical scroll, thin bars. */
+.viewer {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: var(--r-sm);
+  background: rgba(0,0,0,.2);
+  scrollbar-width: thin;
+}
+.viewer::-webkit-scrollbar { width: 8px; height: 8px; }
+.viewer::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.18);
+  border-radius: 4px;
+}
+.viewer::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,.32);
+}
+.viewer-inner {
+  min-width: max-content;       /* let header + rows reach their grid width */
+  /* No height constraint — height = sticky header + .viewer-body's
+     inline-set height, which can be 100k+ px at 10k rows. The .viewer
+     parent is `overflow: auto` so this is what triggers the scrollbar. */
+}
+
+.viewer-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text3);
+  font-size: 12px;
+}
+.viewer-empty.hidden { display: none; }
+
+/* THE source of truth for column widths. Both header and data rows
+   reuse this template, so cells align across rows regardless of
+   content length. 20 tracks total — adjust here, not per-cell.
+   The Keepa graph image itself is clickable to open the chart modal,
+   so a separate 監視グラフ column is unnecessary.
+   The trash view re-uses this same template but binds different
+   headers to the columns. */
+.viewer-row {
+  display: grid;
+  grid-template-columns:
+    64px        /* checkbox + すべて header button */
+    230px       /* group: サイト比較 + name + 変更/登録 in a row */
+    100px       /* last fetched */
+    100px       /* registered */
+    76px        /* image — widened so 「商品写真」 header fits one line */
+    240px       /* title */
+    100px       /* ASIN */
+    100px       /* condition */
+    160px       /* delivery */
+    76px        /* MP count — widened so 「出品者数」 header fits one line */
+    100px       /* Keepa (also opens chart modal on click) */
+    90px        /* BuyBox */
+    62px        /* points */
+    96px        /* effective */
+    120px       /* avg 1d */
+    120px       /* avg 7d */
+    120px       /* avg 30d */
+    120px       /* avg 90d */
+    120px       /* avg 180d */
+    120px;      /* other sellers */
+  align-items: center;
+  height: 72px;        /* must match ROW_HEIGHT in renderer.js */
+}
+.viewer-row > div {
+  padding: 8px 10px;   /* vertical + horizontal breathing room */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+/* Header row — sticky to top of scroll container. */
+.viewer-row.viewer-header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 46px;
+  background: rgba(15,15,30,.97);
+  border-bottom: 2px solid rgba(255,153,0,.28);
+  font-weight: 700;
+  color: var(--text2);
+}
+.viewer-row.viewer-header > div {
+  font-size: 10px;
+  letter-spacing: .3px;
+  /* nowrap on the primary header line — column widths in the grid
+     template are sized so each label fits. The optional <span class
+     ="col-sub"> below the main label is allowed to wrap normally. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.15;
+  align-items: center;
+}
+.viewer-row.viewer-header .col-sub {
+  white-space: nowrap;
+}
+.viewer-row.viewer-header .col-sub {
+  display: block;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text3);
+  letter-spacing: 0;
+  margin-top: 1px;
+}
+
+/* 監視グラフ列のクリック可能なヘッダー — 期間切替ドロップダウンを開く。
+   通常の列ヘッダーと違い、ホバーでアクセント色が出るのでクリック
+   できると分かるようにしている。 */
+.viewer-row.viewer-header .sparkline-header {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+  transition: background 120ms, color 120ms;
+}
+.viewer-row.viewer-header .sparkline-header:hover {
+  background: rgba(255,153,0,.10);
+  color: var(--accent, #ff9900);
+}
+.viewer-row.viewer-header .sparkline-header:hover .col-sub {
+  color: var(--accent, #ff9900);
+}
+
+/* Floating period picker — anchored under the column header by JS,
+   so this rule only owns visuals (palette, padding, shadow). */
+.sparkline-dropdown {
+  position: fixed;
+  z-index: 200;
+  min-width: 168px;
+  padding: 6px;
+  background: rgba(15,15,30,.98);
+  border: 1px solid rgba(255,153,0,.32);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.55);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sparkline-dropdown button {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text, #e6e6f0);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: 5px;
+  cursor: pointer;
+  letter-spacing: .2px;
+}
+.sparkline-dropdown button:hover {
+  background: rgba(255,153,0,.14);
+  color: #ffb44d;
+}
+.sparkline-dropdown button.active {
+  background: rgba(255,153,0,.22);
+  color: #ffd28a;
+  border-color: rgba(255,153,0,.45);
+}
+
+/* Data rows — virtualized via absolute positioning. The bottom
+   border is bumped to ~12% white so row boundaries are clearly
+   etched (per client request: 「境目の線をもう少し刻して」). */
+.viewer-body {
+  position: relative;
+}
+.viewer-row.virtual {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid rgba(255,255,255,.18);
+  transition: background .12s;
+}
+/* Vertical column dividers — thin lines between cells so the table
+   doesn't read as one merged block of text. */
+.viewer-row.virtual > div + div,
+.viewer-row.viewer-header > div + div {
+  border-left: 1px solid rgba(255,255,255,.06);
+}
+.viewer-row.virtual:hover {
+  background: rgba(255,255,255,.04);
+}
+.viewer-row.virtual.row-selected {
+  background: rgba(255,153,0,.10);
+}
+
+/* ── Frozen columns (Excel-style freeze panes) ────────────────
+   Pin the first 3 cells of every row — checkbox, group, 最新取得日時 —
+   so they stay visible while the user scrolls horizontally. The
+   `left:` offsets are cumulative widths from the grid template:
+     col1 (checkbox) = 64
+     col2 (group)    = 230  → starts at 64
+     col3 (date)     = 100  → starts at 64 + 230 = 294
+   Frozen cells need an opaque background; otherwise scrolling content
+   underneath would show through. The body uses --bg2 and the header
+   uses its own dark bg so they read as solid panes. A 2-px accent
+   border on the third frozen cell visually marks the freeze edge. */
+.viewer-row > div:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg2);
+}
+.viewer-row > div:nth-child(2) {
+  position: sticky;
+  left: 64px;
+  z-index: 2;
+  background: var(--bg2);
+}
+.viewer-row > div:nth-child(3) {
+  position: sticky;
+  left: 294px;
+  z-index: 2;
+  background: var(--bg2);
+  border-right: 2px solid rgba(255,153,0,.4);
+  box-shadow: 4px 0 8px rgba(0,0,0,.35);
+}
+
+/* Header's frozen corners — sticky on both axes. Need a higher
+   z-index than body sticky cells (which are 2) and the header row
+   itself (which is 3) so they don't get occluded when the user
+   scrolls in either direction. */
+.viewer-row.viewer-header > div:nth-child(1),
+.viewer-row.viewer-header > div:nth-child(2),
+.viewer-row.viewer-header > div:nth-child(3) {
+  z-index: 4;
+  background: rgba(15,15,30,.99);
+}
+
+/* Hover / selected states need to repaint the frozen cells too,
+   otherwise the row's background color is hidden by the cell's
+   solid bg. Equivalent solid colors approximate the alpha-blended
+   row bg over --bg2. */
+.viewer-row.virtual:hover > div:nth-child(1),
+.viewer-row.virtual:hover > div:nth-child(2),
+.viewer-row.virtual:hover > div:nth-child(3) {
+  background: #1a1a30;
+}
+.viewer-row.virtual.row-selected > div:nth-child(1),
+.viewer-row.virtual.row-selected > div:nth-child(2),
+.viewer-row.virtual.row-selected > div:nth-child(3) {
+  background: #3a2a10;
+}
+
+/* Per-cell formatting. The grid template above sets each cell's width;
+   these rules just style content within. */
+.cell-check     { justify-content: center; padding: 0 !important; }
+.cell-check input { cursor: pointer; }
+
+/* Header すべて button — toggles select/deselect all filtered rows. */
+.header-select-all {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,153,0,.35);
+  background: rgba(255,153,0,.08);
+  color: var(--accent);
+  cursor: pointer;
+  letter-spacing: .2px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.header-select-all:hover {
+  background: rgba(255,153,0,.18);
+  border-color: rgba(255,153,0,.55);
+}
+.header-select-all.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1a2a;
+  box-shadow: 0 0 8px rgba(255,153,0,.4);
+}
+
+.cell-asin      { font-family: "Consolas", monospace; font-weight: 700; color: var(--accent); }
+.cell-asin a    { color: var(--accent); text-decoration: none; }
+.cell-asin a:hover { text-decoration: underline; }
+
+/* Product thumbnail (Amazon CDN). Shimmer-while-loading → solid-on-load
+   → hidden-on-error pattern, driven by load/error listeners in
+   renderer.js (createRow). */
+.cell-thumb { padding: 0 6px !important; }
+.cell-thumb img {
+  display: block;
+  width: 40px; height: 40px;
+  object-fit: contain;
+  border-radius: 4px;
+  background-color: rgba(255,255,255,.04);
+  background-image: linear-gradient(
+    100deg,
+    rgba(255,255,255,0)   30%,
+    rgba(255,255,255,.07) 50%,
+    rgba(255,255,255,0)   70%
+  );
+  background-size: 200% 100%;
+  background-position: 100% 0;
+  animation: img-shimmer 1.6s linear infinite;
+  font-size: 0;
+  color: transparent;
+}
+.cell-thumb img.loaded {
+  animation: none;
+  background-image: none;
+  background-color: rgba(255,255,255,.04);
+}
+.cell-thumb img.error {
+  animation: none;
+  background-image: none;
+  background-color: rgba(252,129,129,.05);
+  visibility: hidden;
+}
+@keyframes img-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* Sparkline canvas — replaces the old Keepa thumbnail. Renders from
+   our own observation data, so it draws synchronously after the
+   IPC fetch resolves. No shimmer/error states needed (the canvas
+   shows an empty-state dash when there's no data yet). */
+.cell-keepa { padding: 0 6px !important; }
+.cell-keepa canvas {
+  display: block;
+  width: 88px; height: 44px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.04);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cell-keepa canvas:hover {
+  border-color: rgba(255,153,0,.25);
+}
+
+/* Title and delivery are the only cells that wrap (2-line clamp).
+   Override the base nowrap so the user can read longer Japanese
+   titles without ellipsis truncation cutting off too aggressively.
+   Hover reveals the full string via the title attribute set in
+   activeRowHtml/trashRowHtml. cursor: help signals to the user
+   that more is hidden. */
+/* Single-line title with ellipsis. Long product names truncate at
+   the column boundary; hover reveals the full string via the title
+   attribute set in activeRowHtml/trashRowHtml. */
+.cell-title {
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+.cell-delivery {
+  white-space: normal !important;
+  font-size: 10px;
+  color: var(--text2);
+  line-height: 1.35;
+  display: -webkit-box !important;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  cursor: help;
+}
+.cell-condition {
+  cursor: help;
+}
+
+.cell-price       { font-weight: 700; color: var(--price-color); }
+.cell-effective   {
+  font-weight: 800;
+  color: var(--price-color);
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 1px;
+}
+.cell-effective .eff-val {
+  font-weight: 800;
+  color: var(--price-color);
+  line-height: 1.1;
+}
+.cell-effective .eff-diff {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 0 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.cell-effective .eff-pct {
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: .2px;
+  font-variant-numeric: tabular-nums;
+}
+/* 色分けは Discord 通知側と統一 (2026-05 クライアント要望) —
+   正値 (= 価格下落)  → 赤  (アラート / 注目)
+   負値 (= 価格上昇)  → 青
+   旧仕様では「買い手目線」で正=青 (お得) だったが、Discord 側との
+   一貫性を優先する形に統一した。 */
+.cell-effective .eff-diff.pos,
+.cell-effective .eff-pct.pos  { color: #fc8181; background: rgba(252,129,129,.12); }
+.cell-effective .eff-diff.neg,
+.cell-effective .eff-pct.neg  { color: #5b9eff; background: rgba(91,158,255,.12); }
+.cell-effective .eff-diff.flat,
+.cell-effective .eff-pct.flat { color: var(--text3); background: transparent; }
+.cell-effective .eff-pct.pos,
+.cell-effective .eff-pct.neg,
+.cell-effective .eff-pct.flat { background: transparent; padding: 0; }
+.cell-points      { color: var(--text2); }
+.cell-time        { font-size: 10px; color: var(--text3); }
+.cell-condition   { font-size: 10.5px; color: var(--text2); }
+.cell-mpcount     { color: var(--text); justify-content: flex-end; }
+
+.cell-group {
+  padding: 0 10px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  cursor: default;
+  overflow: hidden;
+}
+.row-group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 5px 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  box-sizing: border-box;
+  letter-spacing: .2px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+.row-mini-btn {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.05);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: .3px;
+  line-height: 1.2;
+  box-sizing: border-box;
+  transition: background .15s ease, border-color .15s ease, color .15s ease, transform .12s ease, box-shadow .15s ease;
+}
+.row-mini-btn:hover {
+  background: rgba(255,255,255,.12);
+  border-color: rgba(255,255,255,.32);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0,0,0,.25);
+}
+.row-mini-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+.row-compare-btn {
+  color: var(--accent);
+  border-color: rgba(255,153,0,.4);
+  background: linear-gradient(135deg, rgba(255,153,0,.16), rgba(255,153,0,.06));
+}
+.row-compare-btn:hover {
+  background: linear-gradient(135deg, rgba(255,153,0,.28), rgba(255,153,0,.12));
+  border-color: rgba(255,153,0,.65);
+  box-shadow: 0 2px 8px rgba(255,153,0,.25);
+}
+.row-group-add-btn {
+  flex: 1 1 auto;
+  color: #8feab3;
+  border-color: rgba(104,211,145,.4);
+  background: linear-gradient(135deg, rgba(104,211,145,.14), rgba(104,211,145,.05));
+}
+.row-group-add-btn:hover {
+  background: linear-gradient(135deg, rgba(104,211,145,.26), rgba(104,211,145,.10));
+  border-color: rgba(104,211,145,.65);
+  box-shadow: 0 2px 8px rgba(104,211,145,.22);
+}
+.row-group-edit-btn {
+  color: var(--text2);
+}
+
+/* Row-level group picker modal */
+.row-group-target {
+  font-family: "Consolas", monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(255,153,0,.2);
+  border-radius: 4px;
+  display: inline-block;
+}
+.row-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+}
+.row-group-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  transition: background .12s;
+}
+.row-group-item:last-child { border-bottom: none; }
+.row-group-item:hover {
+  background: rgba(255,153,0,.1);
+}
+.row-group-item.current {
+  background: rgba(255,153,0,.18);
+  color: var(--accent);
+  font-weight: 700;
+}
+.row-group-count {
+  font-size: 10px;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,.06);
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.cell-actions { padding: 0 4px !important; justify-content: center; }
+.cell-actions button,
+.cell-actions a {
+  padding: 3px 8px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.15);
+  color: var(--text2);
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  line-height: 1.3;
+}
+.cell-actions button:hover,
+.cell-actions a:hover {
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+}
+
+/* Diff badges shown next to each moving-average value: +N (above latest)
+   in red-ish, -N (below latest) in green-ish. Cells justify content to
+   the right so prices line up vertically across rows. */
+/* 3-line stacked price cell:
+     ¥4,641      ← avg-val (the average price)
+       -339      ← avg-diff (avg − latest, jpy)
+     (-7%)      ← avg-pct  ((avg − latest) / avg × 100)
+   All right-aligned so columns stay optically clean across rows.
+   Color encodes the buyer's perspective per client spec:
+     positive (latest cheaper than avg) → blue   "お得"
+     negative (latest pricier than avg) → red    "割高"
+     zero                                → grey
+   This is intentionally the OPPOSITE of stock-market red/green
+   conventions — the requirement is buyer-cost-centric. */
+.cell-avg {
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 1px;
+}
+.cell-avg .avg-val {
+  font-weight: 700;
+  color: var(--price-color);
+  line-height: 1.1;
+}
+.cell-avg .avg-diff {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 0 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+.cell-avg .avg-pct {
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: .2px;
+  font-variant-numeric: tabular-nums;
+}
+/* 正=赤 / 負=青 (Discord 通知と統一、2026-05)。詳細は .cell-effective の
+   同様コメント参照。 */
+.cell-avg .avg-diff.pos,
+.cell-avg .avg-pct.pos  { color: #fc8181; background: rgba(252,129,129,.12); }
+.cell-avg .avg-diff.neg,
+.cell-avg .avg-pct.neg  { color: #5b9eff; background: rgba(91,158,255,.12); }
+.cell-avg .avg-diff.flat,
+.cell-avg .avg-pct.flat { color: var(--text3); background: transparent; }
+.cell-avg .avg-pct.pos,
+.cell-avg .avg-pct.neg,
+.cell-avg .avg-pct.flat { background: transparent; padding: 0; }
+.cell-avg.empty .avg-val { color: var(--text3); }
+
+/* Group management modal */
+.group-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: rgba(4,4,14,.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.group-modal.hidden { display: none; }
+.group-modal-card {
+  background: linear-gradient(180deg, rgba(20,20,34,.99), rgba(14,14,24,.99));
+  border: 1px solid rgba(255,153,0,.3);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.group-modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.group-modal-hint {
+  font-size: 10.5px;
+  color: var(--text2);
+}
+.group-row {
+  display: grid !important;
+  grid-template-columns: 50px 1fr 60px 24px;
+  align-items: center;
+  gap: 8px;
+}
+.grp-num {
+  font-size: 10.5px;
+  color: var(--text3);
+  font-weight: 600;
+}
+.grp-input {
+  padding: 5px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  width: 100%;
+}
+.grp-input.grp-empty {
+  color: var(--text3);
+  font-style: italic;
+}
+.grp-input:focus {
+  outline: none;
+  border-color: var(--input-focus);
+  font-style: normal;
+  color: var(--text);
+}
+.grp-del {
+  font-size: 16px;
+  padding: 0 4px;
+}
+.group-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.group-modal-body { padding: 12px 14px; }
+.group-modal-add {
+  display: flex; gap: 6px; margin-bottom: 10px;
+}
+.group-modal-add input {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--r-xs);
+  color: var(--text);
+  font-size: 12px;
+}
+.group-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.group-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  font-size: 12px;
+}
+.group-list .grp-name { flex: 1; color: var(--text); }
+.group-list .grp-count { font-size: 10px; color: var(--text3); }
+.group-list button {
+  padding: 2px 6px;
+  font-size: 10px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.12);
+  color: var(--text2);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.group-list button:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+.btn-link:hover { color: var(--text); }
+
+/* ── Chart modal (opens on product-card click) ─────────────── */
+.chart-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;                   /* above login-gate (1000) */
+  background: rgba(4, 4, 14, .82);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 14px;
+}
+.chart-modal.hidden { display: none; }
+
+.chart-modal-card {
+  background: linear-gradient(180deg, rgba(20,20,34,.99), rgba(14,14,24,.99));
+  border: 1px solid rgba(255,153,0,.25);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.55);
+  width: 100%;
+  max-width: 1200px;
+  max-height: calc(100vh - 28px);  /* hard cap so .chart-modal-body can scroll */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chart-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  flex-shrink: 0;
+}
+.chart-modal-title {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0; flex: 1;
+}
+.chart-modal-asin {
+  font-family: "Consolas", monospace;
+  font-weight: 700; font-size: 11.5px;
+  color: var(--accent);
+  padding: 2px 8px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(255,153,0,.2);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.chart-modal-name {
+  font-size: 12px;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chart-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  font-size: 22px;
+  line-height: 1;
+  width: 30px; height: 30px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background .12s, color .12s;
+}
+.chart-modal-close:hover { background: rgba(255,255,255,.06); color: var(--text); }
+
+.chart-modal-periods {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  flex-shrink: 0;
+}
+.chart-modal-periods button {
+  padding: 5px 10px;
+  font-size: 11px;
+  background: rgba(255,255,255,.04);
+  color: var(--text2);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all .12s;
+}
+.chart-modal-periods button:hover {
+  background: rgba(255,255,255,.08);
+  color: var(--text);
+}
+.chart-modal-periods button.active {
+  background: var(--accent-soft);
+  border-color: rgba(255,153,0,.4);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chart-modal-body {
+  padding: 8px 14px 14px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+/* 10 px wide, visible thumb (~22% white), brightens on hover. Removed
+   the `scrollbar-width: thin` that was hiding it before. */
+.chart-modal-body::-webkit-scrollbar { width: 10px; }
+.chart-modal-body::-webkit-scrollbar-track {
+  background: rgba(255,255,255,.04);
+  border-radius: 5px;
+  margin: 4px 0;
+}
+.chart-modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.22);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.chart-modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,.4);
+  background-clip: padding-box;
+}
+
+.chart-container {
+  margin-top: 10px;
+  padding: 8px 10px 10px;
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(255,255,255,.05);
+  border-radius: 6px;
+}
+.chart-container:first-child { margin-top: 0; }
+.chart-container-large {
+  padding: 10px 12px 12px;
+}
+.chart-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: .3px;
+  margin-bottom: 4px;
+}
+.chart-canvas {
+  display: block;
+  width: 100%;
+  height: 140px;
+  cursor: default;
+}
+.chart-canvas-large {
+  height: 360px;
+}
+
+/* ── 監視グラフ split layout (charts left, controls right) ── */
+.chart-modal-split {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.chart-stack {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chart-container-price,
+.chart-container-count {
+  display: flex;
+  flex-direction: column;
+}
+.chart-canvas-price { height: 320px; }
+.chart-canvas-count { height: 180px; }
+
+/* ── 詳細グラフ上部のステータステーブル ──────────────────
+   Same 4-row × 7-col layout as the Discord notification image.
+   CSS Grid auto-distributes the 6 average columns + a fixed-width
+   label column on the left. Negative diff/% in red, positive in
+   blue (buyer-perspective coloring). */
+.chart-stats-table {
+  display: grid;
+  grid-template-columns: 70px repeat(6, 1fr);
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.chart-stats-cell {
+  text-align: right;
+}
+.chart-stats-cell.label {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text2);
+}
+.chart-stats-cell.header {
+  text-align: center;
+  font-weight: 700;
+  color: var(--text2);
+  font-size: 11.5px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(255,255,255,.10);
+}
+.chart-stats-cell.value-price {
+  color: var(--price-color, #ffd56b);
+  font-weight: 700;
+}
+/* 正=赤 / 負=青 (Discord 通知と統一、2026-05) */
+.chart-stats-cell.pos { color: #fc8181; font-weight: 600; }
+.chart-stats-cell.neg { color: #5b9eff; font-weight: 600; }
+.chart-stats-cell.flat { color: var(--text3); }
+
+.chart-row-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.chart-row-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: .3px;
+}
+.chart-autorange {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+  padding: 3px 8px;
+  border: 1px solid rgba(255,153,0,.25);
+  border-radius: 4px;
+  background: rgba(255,153,0,.05);
+  transition: background .12s, border-color .12s;
+}
+.chart-autorange:hover {
+  background: rgba(255,153,0,.12);
+  border-color: rgba(255,153,0,.45);
+}
+.chart-autorange input { margin: 0; cursor: pointer; }
+
+/* Right rail: legend + period selector */
+.chart-side-panel {
+  flex: 0 0 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chart-legend-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 6px;
+  background: rgba(255,255,255,.02);
+  flex-direction: column;
+}
+.chart-legend-vertical .chart-legend-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  margin: 0;
+  font-size: 10.5px;
+  cursor: default;
+  background: transparent;
+  border: none;
+}
+.chart-legend-row.chart-legend-radio {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  transition: background .12s;
+}
+.chart-legend-row.chart-legend-radio:hover {
+  background: rgba(255,153,0,.06);
+}
+.chart-legend-row.chart-legend-radio input {
+  margin: 2px 0 0;
+  cursor: pointer;
+}
+.chart-legend-marker {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
+  margin-top: 1px;
+  color: var(--dot, var(--accent));
+}
+.chart-legend-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.chart-legend-text .chart-legend-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .2px;
+}
+.chart-legend-text .chart-legend-sub {
+  font-size: 9.5px;
+  color: var(--text3);
+  line-height: 1.25;
+}
+.chart-legend-text .chart-legend-value {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: "Consolas", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.chart-legend-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: .4px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255,255,255,.1);
+  text-transform: uppercase;
+}
+
+.chart-period-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 6px;
+  background: rgba(255,255,255,.02);
+}
+.chart-period-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: .3px;
+  margin-bottom: 2px;
+}
+.chart-period-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 3px 4px;
+  border-radius: 3px;
+  transition: background .12s;
+}
+.chart-period-row:hover { background: rgba(255,153,0,.08); }
+.chart-period-row input { margin: 0; cursor: pointer; }
+
+/* Hint cursor when hovering the axis regions (Y gutter and X strip)
+   — subtle enough that users notice the axes are clickable. */
+.chart-canvas:hover { cursor: crosshair; }
+
+/* Multi-series legend — chips with color dot, label, latest value.
+   Chips are buttons so they can be toggled to hide/show each series. */
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  margin-bottom: 4px;
+}
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity .15s, background .15s, border-color .15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.chart-legend-item:hover {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.18);
+}
+.chart-legend-item.hidden-series {
+  opacity: 0.35;
+}
+.chart-legend-item.hidden-series .chart-legend-dot {
+  background: transparent !important;
+  border: 1.5px solid currentColor;
+}
+.chart-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chart-legend-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: .2px;
+}
+.chart-legend-value {
+  font-size: 10.5px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  font-family: "Consolas", "Courier New", monospace;
+}
+
+/* ── Axis editor popover ─────────────────────────────────── */
+.axis-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(4, 4, 14, .72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.axis-editor.hidden { display: none; }
+
+.axis-editor-card {
+  background: linear-gradient(180deg, rgba(28,28,48,.99), rgba(18,18,30,.99));
+  border: 1px solid rgba(255,153,0,.35);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.6);
+  padding: 16px 16px 12px;
+  min-width: 260px;
+  max-width: 340px;
+  width: 100%;
+}
+.axis-editor-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 10px;
+  letter-spacing: .3px;
+}
+.axis-editor-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.axis-editor-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--text2);
+  font-weight: 600;
+  letter-spacing: .3px;
+}
+.axis-editor-fields input {
+  padding: 7px 9px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 12.5px;
+  outline: none;
+  transition: border-color .12s;
+}
+.axis-editor-fields input:focus {
+  border-color: var(--input-focus);
+}
+.axis-editor-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ── Cycle-rest countdown ring ─────────────────────────────
+   Shown only during the rest period between scrape cycles. Radius is
+   15.9155 so the circle circumference is exactly 100 — that lets us
+   drive `stroke-dashoffset` from 0 (full ring) to 100 (empty ring)
+   directly with a 0–1 progress fraction × 100. */
+.cycle-timer {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cycle-timer.hidden { display: none; }
+
+.cycle-timer-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);       /* start stroke at 12 o'clock */
+}
+.cycle-timer-bg {
+  fill: none;
+  stroke: rgba(255,255,255,.08);
+  stroke-width: 2.4;
+}
+.cycle-timer-fg {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 0;            /* renderer.js ticks 0 → 100 over the rest */
+  transition: stroke-dashoffset 0.9s linear;
+  filter: drop-shadow(0 0 3px rgba(255,153,0,.35));
+}
+.cycle-timer-text {
+  position: relative;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: -.2px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* ── Header "Signed in" button variant ────────────────────
+   Applied to #btn-login when isSignedIn() is true, so the user has
+   clear visual confirmation that the Amazon session is persisted. */
+.btn.logged-in {
+  background: rgba(104, 211, 145, .14);
+  border-color: rgba(104, 211, 145, .38);
+  color: #8feab3;
+  font-weight: 600;
+}
+.btn.logged-in:hover {
+  background: rgba(104, 211, 145, .22);
+  border-color: rgba(104, 211, 145, .5);
+}
+
+/* ── Login gate ───────────────────────────────────────────── */
+.login-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(4, 4, 14, 0.92);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.login-gate.hidden { display: none; }
+
+.login-gate-card {
+  max-width: 420px;
+  width: 100%;
+  padding: 28px 26px;
+  background: linear-gradient(180deg, rgba(28, 28, 48, .98), rgba(18, 18, 30, .98));
+  border: 1px solid rgba(255, 153, 0, .35);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5), 0 0 40px rgba(255, 153, 0, .08);
+  text-align: center;
+}
+.login-gate-icon {
+  font-size: 38px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+.login-gate-title {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: .3px;
+}
+.login-gate-desc {
+  margin: 0 0 20px;
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.55;
+}
+.login-gate-btn {
+  width: 100%;
+  padding: 11px 16px;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  margin-bottom: 8px;
+}
+.login-gate-skip {
+  display: block;
+  margin: 4px auto 0;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  opacity: .7;
+  transition: opacity .15s;
+}
+.login-gate-skip:hover { opacity: 1; color: var(--text2); }
+
+/* ── Circuit-breaker banner ─────────────────────────────────
+   Same geometry as the CAPTCHA banner but tinted amber to signal
+   "pacing reduced" rather than "blocked". */
+.circuit-banner {
+  margin: 0 0 10px;
+  padding: 10px 13px;
+  background: linear-gradient(135deg, rgba(251,191,36,.12), rgba(251,191,36,.04));
+  border: 1px solid rgba(251,191,36,.32);
+  border-left: 3px solid #fbbf24;
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: 0 0 18px rgba(251,191,36,.07);
+}
+.circuit-banner-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.circuit-banner-body { flex: 1; min-width: 0; }
+.circuit-banner-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #fbbf24;
+  margin-bottom: 2px;
+}
+.circuit-banner-reason {
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.4;
+}
+.circuit-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 /* ── Add-ASIN status line ─────────────────────────────────── */
 .asin-status {
   margin-top: 8px;
@@ -749,6 +3056,27 @@ select option { background: var(--bg2); }
   border: 1px solid var(--error-border);
   color: var(--error);
   font-weight: 600;
+}
+
+/* Cycle progress ring reuses .cycle-timer styling — just the
+   counts label adjacent to it has its own style. */
+.cycle-progress-counts {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+  background: var(--accent-soft);
+  border: 1px solid rgba(255,153,0,.2);
+  border-radius: 10px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+.cycle-progress-counts.hidden { display: none; }
+
+/* Slightly smaller text inside the progress ring so "100%" fits. */
+#cycle-progress .cycle-timer-text {
+  font-size: 8px;
+  letter-spacing: -.3px;
 }
 
 /* ── Bulk batch progress strip ────────────────────────────── */
@@ -846,6 +3174,39 @@ select option { background: var(--bg2); }
   overflow: hidden; word-break: break-all;
 }
 
+/* Image-and-title row — thumbnail on the left, product title to its
+   right. The title drops its own bottom margin so the combined row
+   keeps a single 9 px gap below it. */
+.asin-card-body {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 9px;
+}
+.asin-card-body .asin-card-title {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+  -webkit-line-clamp: 3;  /* can wrap to 3 lines since the image row is ~64 px tall anyway */
+}
+
+.asin-card-thumb {
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  object-fit: contain;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 6px;
+  padding: 2px;
+}
+.asin-card-thumb.empty {
+  /* Keep the slot reserved so the title width doesn't shift when
+     an image loads partway through a cycle — just hide the broken
+     image frame until src is set. */
+  visibility: hidden;
+}
+
 .asin-card-error {
   margin: 0 0 9px;
   padding: 6px 10px;
@@ -860,7 +3221,7 @@ select option { background: var(--bg2); }
 .asin-card-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 7px 12px;
+  gap: 5px 12px;
   margin-bottom: 8px;
 }
 .asin-card-grid .field-wide { grid-column: 1 / -1; }
@@ -879,6 +3240,20 @@ select option { background: var(--bg2); }
   font-size: 15px; font-weight: 800;
   color: var(--price-color);
   letter-spacing: -.3px;
+}
+
+/* Delivery strings can run long ("無料配送 4月23日 木曜日にお届け") so give
+   that cell smaller type and allow 2-line clamp. Keeps the grid row
+   height predictable so the card fits its 280 px slot cleanly. */
+.field-delivery {
+  font-size: 10.5px;
+  color: var(--text2);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-weight: 400;
 }
 
 .asin-card-foot {
@@ -901,6 +3276,43 @@ select option { background: var(--bg2); }
 #cond-params {
   display: grid; grid-template-columns: 1fr 1fr;
   gap: 6px; margin: 4px 0 8px;
+}
+
+/* Each input+hint pair stacks vertically inside one grid cell, so the
+   outer 2-col grid layout is preserved while each field gets its own
+   error slot immediately underneath. */
+.cond-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Hidden by default — collapses to zero height so it doesn't push
+   layout. Becomes a single red line when .visible is added. */
+.field-hint {
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--error);
+  padding: 0 4px;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity .15s, max-height .15s;
+  pointer-events: none;
+}
+.field-hint.visible {
+  opacity: 1;
+  max-height: 32px;
+}
+
+/* Invalid input gets a red border as secondary visual cue. */
+.cond-field.invalid input {
+  border-color: var(--error-border);
+}
+.cond-field.invalid input:focus {
+  border-color: var(--error);
+  box-shadow: 0 0 0 2px rgba(252,129,129,.15);
 }
 
 /* ── Discord Tab ─────────────────────────────────────────── */

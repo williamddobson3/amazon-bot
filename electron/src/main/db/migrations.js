@@ -2,7 +2,7 @@
 
 // All migrations run on first launch (or when the schema version bumps).
 // Each statement is idempotent via IF NOT EXISTS so re-running is safe.
-// sql.js's db.run() executes one statement at a time, so we split them.
+// Executed via better-sqlite3's db.exec() — one statement per call.
 
 const STATEMENTS = [
   // Products
@@ -50,20 +50,14 @@ const STATEMENTS = [
     max_price    INTEGER,
     avg_points   REAL,
     avg_mp_price REAL,
+    avg_mp_count REAL,
     sample_count INTEGER DEFAULT 0,
     PRIMARY KEY (asin, day_date)
   )`,
 
-  // Conditions (alert rules)
-  `CREATE TABLE IF NOT EXISTS conditions (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    asin         TEXT,
-    rule_type    TEXT NOT NULL,
-    rule_params  TEXT NOT NULL,
-    enabled      INTEGER DEFAULT 1,
-    cooldown_sec INTEGER DEFAULT 3600,
-    last_fired   INTEGER
-  )`,
+  // (`conditions` table removed 2026-05 — legacy alert-rule engine
+  // replaced entirely by FNM custom-filter slots. Existing rows in
+  // older installs are dropped at startup, see runMigrations below.)
 
   // Notification log
   `CREATE TABLE IF NOT EXISTS notifications (
@@ -82,12 +76,47 @@ const STATEMENTS = [
     key   TEXT PRIMARY KEY,
     value TEXT
   )`,
+
+  // Block-event telemetry — every CAPTCHA / WAF block the fetcher sees,
+  // with enough metadata to correlate triggers over time. Used by the
+  // health panel and for post-hoc pacing tuning.
+  `CREATE TABLE IF NOT EXISTS block_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at INTEGER NOT NULL,
+    block_type  TEXT NOT NULL,
+    source      TEXT,
+    streak      INTEGER DEFAULT 0,
+    url_len     INTEGER,
+    final_url   TEXT
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_block_time ON block_events(occurred_at)`,
+
+  // Groups — at most 20 groups per spec. Used to filter the viewer
+  // and bulk-classify products. Each product belongs to ≤1 group.
+  `CREATE TABLE IF NOT EXISTS groups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`,
 ];
 
 function runMigrations(db) {
   for (const stmt of STATEMENTS) {
-    db.run(stmt);
+    db.exec(stmt);
   }
+  // Additive columns for databases created before later features.
+  // SQLite has no `ADD COLUMN IF NOT EXISTS`, so we just catch the
+  // "duplicate column" error if it's already present.
+  try { db.exec('ALTER TABLE observations_daily ADD COLUMN avg_mp_count REAL'); } catch {}
+  // Soft-delete: trashed_at is null for active products, a ms timestamp
+  // for products in the trash bin. Permanent deletion is `DELETE FROM ...`.
+  try { db.exec('ALTER TABLE products ADD COLUMN trashed_at INTEGER'); } catch {}
+  // Group assignment: FK to groups.id. Null = ungrouped.
+  try { db.exec('ALTER TABLE products ADD COLUMN group_id INTEGER'); } catch {}
+  // One-shot cleanup: drop the `conditions` table on installs that
+  // ran prior versions. Any leftover rows in there were silently
+  // firing notifications via the old evaluator path.
+  try { db.exec('DROP TABLE IF EXISTS conditions'); } catch {}
 }
 
 module.exports = { runMigrations };

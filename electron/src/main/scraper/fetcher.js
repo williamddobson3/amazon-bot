@@ -3,9 +3,13 @@
 const { session } = require('electron');
 const {
   AMAZON_BASE,
+  JA_LANG_QUERY,
   FETCH_MIN_INTERVAL_MS,
   FETCH_JITTER_MS,
   CAPTCHA_PAUSE_LADDER_MS,
+  CIRCUIT_BREAKER_THRESHOLD,
+  CIRCUIT_BREAKER_DURATION_MS,
+  CIRCUIT_BREAKER_INTERVAL_MS,
 } = require('../../shared/constants');
 
 // A real Chrome 133 User-Agent on Windows. We MUST override Electron's
@@ -22,6 +26,31 @@ function initSession() {
   console.log('[fetcher] session UA set to real Chrome');
 }
 
+// Check whether the defaultSession cookie jar contains a valid Amazon
+// auth cookie. Amazon's auth token is marketplace-specific:
+//   at-main    — US      (amazon.com)
+//   at-acbjp   — Japan   (amazon.co.jp)
+//   at-acb{cc} — other country-specific marketplaces
+// Any at-* cookie with a real-length token value means signed in.
+// Cheap (cookie-store read, no network), safe to call on every startup.
+async function isSignedIn() {
+  try {
+    // `cookies.get({ url })` returns cookies that would be sent with a
+    // request to that URL — resolves both `.amazon.co.jp` and
+    // `amazon.co.jp` domain forms automatically.
+    const cookies = await session.defaultSession.cookies.get({
+      url: 'https://www.amazon.co.jp/',
+    });
+    return cookies.some((c) =>
+      c.name && c.name.startsWith('at-') &&
+      c.value && c.value.length > 10
+    );
+  } catch (err) {
+    console.warn('[fetcher] cookie check failed:', err.message);
+    return false;
+  }
+}
+
 // ── Token bucket ────────────────────────────────────────────
 
 let nextAllowedFetchAt = 0;
@@ -30,31 +59,58 @@ let captchaStreak      = 0;
 let lastPauseSetAt     = 0;
 const PAUSE_DEDUP_MS   = 5000;
 
+// Circuit breaker — when active, the token bucket uses the slower
+// CIRCUIT_BREAKER_INTERVAL_MS instead of FETCH_MIN_INTERVAL_MS.
+let circuitBreakerUntil = 0;
+
 let onPauseCallback    = null; // set by scheduler
 let onResumeCallback   = null;
+let onCircuitCallback  = null;
+let onBlockCallback    = null; // for telemetry logging
 
 function setPauseCallbacks(onPause, onResume) {
   onPauseCallback = onPause;
   onResumeCallback = onResume;
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+function setCircuitCallback(cb) { onCircuitCallback = cb; }
+function setBlockCallback(cb)   { onBlockCallback   = cb; }
+
+// Abortable sleep — resolves either when the timer elapses or when the
+// AbortSignal fires. The caller must check `signal?.aborted` after to
+// know which path won, since both produce a fulfilled promise (no
+// rejection — keeps the call-site simple).
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal && signal.aborted) return resolve();
+    const t = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        clearTimeout(t);
+        resolve();
+      }, { once: true });
+    }
+  });
 }
 
-async function awaitFetchSlot() {
+async function awaitFetchSlot(signal) {
   // 1. CAPTCHA pause
   if (pausedUntil > Date.now()) {
-    await sleep(pausedUntil - Date.now());
+    await sleep(pausedUntil - Date.now(), signal);
+    if (signal && signal.aborted) return;
   }
   // 2. Token bucket
   const now = Date.now();
   if (nextAllowedFetchAt > now) {
-    await sleep(nextAllowedFetchAt - now);
+    await sleep(nextAllowedFetchAt - now, signal);
+    if (signal && signal.aborted) return;
   }
-  // 3. Reserve next slot
+  // 3. Reserve next slot — interval depends on circuit-breaker state.
+  const minInterval = circuitBreakerUntil > Date.now()
+    ? CIRCUIT_BREAKER_INTERVAL_MS
+    : FETCH_MIN_INTERVAL_MS;
   const jitter = Math.floor(Math.random() * FETCH_JITTER_MS);
-  nextAllowedFetchAt = Date.now() + FETCH_MIN_INTERVAL_MS + jitter;
+  nextAllowedFetchAt = Date.now() + minInterval + jitter;
 }
 
 function triggerPause(reason, solveUrl, source) {
@@ -72,8 +128,29 @@ function triggerPause(reason, solveUrl, source) {
     `(streak=${captchaStreak}${withinBurst ? ', burst' : ''}, source=${source})`
   );
 
+  if (onBlockCallback) {
+    onBlockCallback({
+      type: reason,
+      source,
+      streak: captchaStreak,
+      finalUrl: solveUrl,
+      urlLen: (solveUrl || '').length,
+    });
+  }
+
   if (onPauseCallback) {
     onPauseCallback({ pausedUntil, reason, solveUrl, source, streak: captchaStreak });
+  }
+
+  // Circuit-breaker trip — only re-arm if not already tripped.
+  if (captchaStreak >= CIRCUIT_BREAKER_THRESHOLD && circuitBreakerUntil < now) {
+    circuitBreakerUntil = now + CIRCUIT_BREAKER_DURATION_MS;
+    console.warn(
+      `[fetcher] circuit breaker TRIPPED — pacing reduced to ${CIRCUIT_BREAKER_INTERVAL_MS/1000}s for 24h`
+    );
+    if (onCircuitCallback) {
+      onCircuitCallback({ active: true, until: circuitBreakerUntil, streak: captchaStreak });
+    }
   }
 }
 
@@ -102,10 +179,29 @@ function getPauseState() {
   return null;
 }
 
+function isCircuitBreakerActive() {
+  return circuitBreakerUntil > Date.now();
+}
+
+function getCircuitBreakerState() {
+  return circuitBreakerUntil > Date.now()
+    ? { active: true, until: circuitBreakerUntil }
+    : { active: false, until: 0 };
+}
+
+// Manual reset — exposed via IPC for the user to clear the breaker
+// early if they've verified the block rate has recovered.
+function clearCircuitBreaker() {
+  if (circuitBreakerUntil > 0) {
+    circuitBreakerUntil = 0;
+    console.info('[fetcher] circuit breaker manually cleared');
+    if (onCircuitCallback) onCircuitCallback({ active: false, until: 0 });
+  }
+}
+
 // ── Block-page classification ───────────────────────────────
 
 function classifyBlock(html, finalUrl) {
-  // Google IP-level block
   if (
     finalUrl.includes('google.com/sorry') ||
     finalUrl.includes('google.co.jp/sorry') ||
@@ -116,12 +212,10 @@ function classifyBlock(html, finalUrl) {
     return { error: 'GOOGLE_CAPTCHA', reason: 'Google IP-level bot detection', source: 'google', solveUrl: finalUrl };
   }
 
-  // Google reCAPTCHA widget
   if (html.includes('google.com/recaptcha') || html.includes('g-recaptcha')) {
     return { error: 'GOOGLE_RECAPTCHA', reason: 'Google reCAPTCHA widget', source: 'google', solveUrl: finalUrl };
   }
 
-  // Network / ISP interception
   if (
     finalUrl &&
     !finalUrl.includes('amazon.co.jp') &&
@@ -133,7 +227,6 @@ function classifyBlock(html, finalUrl) {
     return { error: 'NETWORK_BLOCK', reason: 'Network interception', source: 'network', solveUrl: finalUrl };
   }
 
-  // Amazon CAPTCHA
   if (
     html.includes('validateCaptcha') ||
     html.includes('Type the characters you see in this image') ||
@@ -142,7 +235,6 @@ function classifyBlock(html, finalUrl) {
     return { error: 'CAPTCHA', reason: 'Amazon CAPTCHA', source: 'amazon', solveUrl: finalUrl };
   }
 
-  // Amazon dog page
   if (
     html.includes('Sorry, we just need to make sure') ||
     (html.includes('cs-help-home') && html.length < 5000)
@@ -150,7 +242,6 @@ function classifyBlock(html, finalUrl) {
     return { error: 'DOG_PAGE', reason: 'Amazon dog page', source: 'amazon', solveUrl: finalUrl };
   }
 
-  // Amazon login wall
   if (
     finalUrl.includes('/ap/signin') ||
     finalUrl.includes('/ap/register') ||
@@ -164,9 +255,6 @@ function classifyBlock(html, finalUrl) {
 
 // ── Fetch ───────────────────────────────────────────────────
 
-// Full set of headers matching a real Chrome 133 top-level navigation.
-// These are what Amazon's WAF checks to decide whether to serve the full
-// SSR page (with product cards) or a JS-dependent shell.
 const BROWSER_HEADERS = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
   'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -182,8 +270,9 @@ const BROWSER_HEADERS = {
   'sec-fetch-user': '?1',
 };
 
-async function fetchPage(url) {
-  await awaitFetchSlot();
+async function fetchPage(url, { signal } = {}) {
+  await awaitFetchSlot(signal);
+  if (signal && signal.aborted) return { error: 'ABORTED' };
 
   try {
     const ses = session.defaultSession;
@@ -191,6 +280,7 @@ async function fetchPage(url) {
       headers: { ...BROWSER_HEADERS },
       redirect: 'follow',
       credentials: 'include',
+      signal,         // Cancels the in-flight request when stop() aborts
     });
 
     if (response.status === 429) {
@@ -213,11 +303,50 @@ async function fetchPage(url) {
       return { error: block.error, finalUrl, source: block.source, solveUrl: block.solveUrl };
     }
 
-    // Clean fetch
     resetStreak();
     return { html, finalUrl, htmlLen: html.length };
   } catch (err) {
+    // ses.fetch throws AbortError when the AbortController fires while
+    // the request is in flight. Surface as ABORTED so the coverage loop
+    // can return cleanly without logging a spurious NETWORK_ERROR.
+    if (err.name === 'AbortError' || (signal && signal.aborted)) {
+      return { error: 'ABORTED' };
+    }
     return { error: 'NETWORK_ERROR', message: err.message };
+  }
+}
+
+// ── Warmup ──────────────────────────────────────────────────
+//
+// Called at the start of a run (or after a long idle) to simulate the
+// first few requests a real user makes. Homepage first, then optionally
+// a bestseller list or generic search. Seeds the session with an
+// organic referrer chain and exercises the csm-hit cookie's page-view
+// sequence so subsequent search URLs don't look like a cold scrape.
+async function warmup() {
+  const urls = [`${AMAZON_BASE}/`];
+  if (Math.random() < 0.5) urls.push(`${AMAZON_BASE}/gp/bestsellers`);
+  if (Math.random() < 0.5) {
+    const genericQueries = ['ベストセラー', '新着', 'セール', '人気'];
+    const q = genericQueries[Math.floor(Math.random() * genericQueries.length)];
+    urls.push(`${AMAZON_BASE}/s?k=${encodeURIComponent(q)}&${JA_LANG_QUERY}`);
+  }
+
+  const ses = session.defaultSession;
+  for (const url of urls) {
+    await awaitFetchSlot();
+    try {
+      const response = await ses.fetch(url, {
+        headers: { ...BROWSER_HEADERS },
+        redirect: 'follow',
+        credentials: 'include',
+      });
+      // Drain the body so cookies settle, then discard.
+      await response.text();
+      console.log(`[fetcher] warmup ${response.status} ${url.split('?')[0].slice(0, 50)}`);
+    } catch (err) {
+      console.warn(`[fetcher] warmup failed for ${url}: ${err.message}`);
+    }
   }
 }
 
@@ -229,4 +358,11 @@ module.exports = {
   isPaused,
   getPauseState,
   setPauseCallbacks,
+  setCircuitCallback,
+  setBlockCallback,
+  isCircuitBreakerActive,
+  getCircuitBreakerState,
+  clearCircuitBreaker,
+  warmup,
+  isSignedIn,
 };

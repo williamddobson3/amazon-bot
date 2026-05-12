@@ -9,6 +9,24 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
+<!-- ── Login gate overlay (shown on startup if not signed in) ── -->
+<div id="login-gate" class="login-gate hidden">
+  <div class="login-gate-card">
+    <div class="login-gate-icon">🔒</div>
+    <h2 class="login-gate-title">Amazon へのサインインが必要です</h2>
+    <p class="login-gate-desc">
+      Sign in to amazon.co.jp before monitoring begins.<br>
+      A logged-in session has significantly higher tolerance for scraping —
+      running without sign-in will trigger CAPTCHA challenges far more often.
+    </p>
+    <button id="btn-login-gate" class="btn btn-primary login-gate-btn">Sign in to Amazon</button>
+    <button id="btn-skip-login" class="login-gate-skip" title="Not recommended — CAPTCHA rate will be substantially higher">
+      Continue without signing in
+    </button>
+  </div>
+</div>
+
 <div id="app-view">
 
 <header id="header">
@@ -18,20 +36,32 @@
   <div id="status-bar">
     <span id="status-indicator" class="status-dot offline"></span>
     <span id="status-text">Stopped</span>
+    <div id="cycle-progress" class="cycle-timer hidden" title="スクレイピング進捗">
+      <svg viewBox="0 0 36 36" class="cycle-timer-svg">
+        <circle class="cycle-timer-bg" cx="18" cy="18" r="15.9155"></circle>
+        <circle class="cycle-timer-fg" id="cycle-progress-fg" cx="18" cy="18" r="15.9155"></circle>
+      </svg>
+      <span class="cycle-timer-text" id="cycle-progress-pct">0%</span>
+    </div>
+    <span id="cycle-progress-counts" class="cycle-progress-counts hidden">0 / 0</span>
+    <div id="cycle-timer" class="cycle-timer hidden" title="次のサイクルまでの残り時間">
+      <svg viewBox="0 0 36 36" class="cycle-timer-svg">
+        <circle class="cycle-timer-bg" cx="18" cy="18" r="15.9155"></circle>
+        <circle class="cycle-timer-fg" cx="18" cy="18" r="15.9155"></circle>
+      </svg>
+      <span class="cycle-timer-text" id="cycle-timer-text">0:00</span>
+    </div>
     <span id="product-count" class="asin-badge">0 items</span>
-    <button id="btn-toggle-scraping" class="btn btn-primary btn-sm" title="Start / Stop">Start</button>
+    <button id="btn-login" class="btn btn-secondary btn-sm" title="Sign in to Amazon — a logged-in session reduces CAPTCHA rate significantly">Login</button>
+    <!-- Per spec: 「クロール開始ボタンをこの１つだけで大丈夫です」 —
+         the only crawl Start/Stop button is the 監視スタート / 監視ストップ
+         in the bulk toolbar below. The header keeps the status dot,
+         text, and item count for at-a-glance state. -->
   </div>
 </header>
 
-<nav id="tabs">
-  <button class="tab active" data-tab="products">Products</button>
-  <button class="tab" data-tab="conditions">Alerts</button>
-  <button class="tab" data-tab="discord">Discord</button>
-  <button class="tab" data-tab="notifications">History</button>
-</nav>
-
-<!-- ── Products Tab ───────────────────────────────────────── -->
-<section id="tab-products" class="tab-content active">
+<!-- ── Single Viewer view (no tab bar — spec is a single-view app) ── -->
+<section id="tab-products" class="main-view">
 
   <!-- CAPTCHA banner (hidden by default) -->
   <div id="captcha-banner" class="captcha-banner hidden">
@@ -46,86 +76,463 @@
     </div>
   </div>
 
-  <!-- Cycle progress strip -->
-  <div id="cycle-progress" class="batch-progress hidden">
-    <div class="batch-progress-row">
-      <div class="batch-progress-label">
-        <span id="cycle-progress-title">Scraping</span>
-        <span id="cycle-progress-counts">0 / 0</span>
-      </div>
-      <div class="batch-progress-meta">
-        <span id="cycle-progress-wave"></span>
-      </div>
+  <!-- Circuit-breaker banner (hidden by default) -->
+  <div id="circuit-banner" class="circuit-banner hidden">
+    <div class="circuit-banner-icon">⚡</div>
+    <div class="circuit-banner-body">
+      <div class="circuit-banner-title">Circuit breaker active</div>
+      <div class="circuit-banner-reason">Repeated blocks detected — pacing reduced for <span id="circuit-remaining">24h</span>.</div>
     </div>
-    <div class="batch-progress-bar">
-      <div class="batch-progress-bar-fill" id="cycle-progress-fill"></div>
+    <div class="circuit-banner-actions">
+      <button id="circuit-clear-btn" class="btn btn-secondary btn-sm">Clear</button>
     </div>
   </div>
 
-  <!-- Add ASINs form -->
-  <div class="form-group">
-    <textarea id="asin-input" rows="3" placeholder="Enter ASINs (one per line or comma-separated)"></textarea>
-    <div class="btn-row">
-      <button id="btn-add" class="btn btn-primary">Add ASINs</button>
-      <label class="btn btn-secondary">
-        Import CSV
-        <input type="file" id="csv-import" accept=".csv,.txt,.xlsx" class="hidden">
-      </label>
+  <!-- ── Top toolbar (everything spec says belongs "above the header") ── -->
+  <div id="viewer-top-toolbar">
+    <!-- Row 1: settings + trash on the left, group + import on the right -->
+    <div class="vtb-row">
+      <div class="vtb-left">
+        <button id="btn-fnm-settings" class="btn btn-secondary btn-sm">
+          フィルタ・通知・メンテナンス設定
+        </button>
+        <button id="btn-toggle-trash" class="btn btn-secondary btn-sm">
+          <span id="btn-toggle-trash-label">ゴミ箱商品閲覧</span>
+        </button>
+        <button id="btn-notif-history" class="btn btn-secondary btn-sm">通知履歴</button>
+      </div>
+      <div class="vtb-right">
+        <!-- Group filter block — per spec image: dropdown on top,
+             "N 件表示" + グループ名設定 button below. The dropdown
+             always lists 20 stable slots (No.1 ... No.20) plus すべて
+             and 登録なし; selecting a slot filters the viewer. -->
+        <div class="group-filter-block">
+          <select id="group-selector" title="グループ選択">
+            <option value="">すべて</option>
+            <option value="0">登録なし</option>
+          </select>
+          <div class="group-filter-meta">
+            <span id="group-filter-count">0 件表示</span>
+            <button id="btn-manage-groups" class="btn-group-rename" title="グループ名を一括変更">グループ名設定</button>
+          </div>
+        </div>
+        <button id="btn-asin-add" class="btn btn-primary btn-sm">ASIN追加</button>
+        <button id="btn-csv-import" class="btn btn-secondary btn-sm" title="CSVファイルからASINリストを追加">監視対象のASINインポート</button>
+      </div>
     </div>
-    <div id="add-status" class="asin-status hidden"></div>
+
+    <!-- Row 2: 「✅した商品の一括操作」 frame.
+         Per spec: actions ALWAYS apply only to ✅checked products,
+         after the user has narrowed the table down with filters.
+         Buttons stay visible at all times so the available actions
+         are discoverable; they're disabled when nothing is selected. -->
+    <div id="bulk-toolbar" class="bulk-toolbar">
+      <div class="bulk-toolbar-head">
+        <span class="bulk-toolbar-label">✅した商品の一括操作</span>
+        <span class="bulk-toolbar-count">(<span id="bulk-selected-count">0</span> 件選択中)</span>
+        <button id="bulk-clear" class="btn-link" title="選択解除">選択解除</button>
+      </div>
+      <div class="bulk-toolbar-actions" id="bulk-toolbar-actions"></div>
+    </div>
   </div>
 
-  <!-- Product list header -->
+  <!-- Search line -->
   <div id="product-list-header">
     <span id="product-list-count">0 items</span>
-    <input type="text" id="product-search" placeholder="Search…">
+    <input type="text" id="product-search" placeholder="Search ASIN or title…">
   </div>
 
-  <!-- Product list (virtual) -->
-  <div id="product-list" class="list-container">
-    <div id="product-list-sizer" class="virtual-sizer"></div>
-  </div>
-</section>
-
-<!-- ── Conditions Tab ─────────────────────────────────────── -->
-<section id="tab-conditions" class="tab-content">
-  <div class="form-group">
-    <select id="cond-type">
-      <option value="moving_avg_below_pct">Price below moving average by %</option>
-      <option value="absolute_price_below">Price below absolute value (¥)</option>
-      <option value="offer_count_drop_pct">Marketplace offer count drops by %</option>
-      <option value="marketplace_below">Marketplace price below value (¥)</option>
-    </select>
-    <div id="cond-params">
-      <input type="text"   id="cond-asin"     placeholder="ASIN (blank = all)">
-      <input type="number" id="cond-value"     placeholder="Value  e.g. 30">
-      <input type="number" id="cond-cooldown"  placeholder="Cooldown min" value="60">
+  <!-- Tabular viewer — CSS-Grid based.
+       Header row sticks to the top of #product-list. Body holds
+       absolutely-positioned virtualized row divs. Both rows share
+       the same grid-template-columns so columns align exactly. -->
+  <div id="product-list" class="viewer">
+    <div class="viewer-inner">
+      <div class="viewer-row viewer-header" id="viewer-thead">
+        <!-- Populated by renderer (different headers for active vs trash) -->
+      </div>
+      <div class="viewer-body" id="viewer-tbody">
+        <!-- Virtualized rows inserted by renderer -->
+      </div>
     </div>
-    <button id="btn-add-condition" class="btn btn-primary">Add Alert</button>
+    <div id="viewer-empty" class="viewer-empty hidden">No products</div>
   </div>
-  <div id="condition-list" class="list-container"></div>
 </section>
 
-<!-- ── Discord Tab ────────────────────────────────────────── -->
-<section id="tab-discord" class="tab-content">
-  <div class="form-group">
-    <label class="field-label-top">Webhook URL</label>
-    <input type="url" id="discord-url" placeholder="https://discord.com/api/webhooks/…">
-    <div class="btn-row">
-      <button id="btn-save-discord" class="btn btn-primary">Save</button>
-      <button id="btn-test-discord" class="btn btn-secondary">Test</button>
+<!-- Group management modal — bulk rename (image9 in v2 spec).
+     Single 保存 button commits all 20 inline name changes at once. -->
+<div id="group-modal" class="group-modal hidden">
+  <div class="group-modal-card">
+    <div class="group-modal-header">
+      <span>グループの名前変更</span>
+      <button id="group-modal-close" class="btn-link">×</button>
+    </div>
+    <div class="group-modal-body">
+      <div class="group-modal-toolbar">
+        <button id="group-save-all" class="btn btn-primary btn-sm">保存</button>
+        <span class="group-modal-hint">最大 20 個のグループ名をまとめて変更できます。</span>
+      </div>
+      <ul id="group-list" class="group-list"></ul>
     </div>
   </div>
-  <div id="discord-status" class="hidden"></div>
-</section>
-
-<!-- ── Notifications Tab ──────────────────────────────────── -->
-<section id="tab-notifications" class="tab-content">
-  <div id="notification-list" class="list-container"></div>
-</section>
+</div>
 
 </div><!-- /app-view -->
 
+<!-- ── 監視グラフ modal — two stacked time-series charts plus a
+     right-side control rail (legend, average radios, period radios,
+     auto-range toggle). The top chart shows price-related series,
+     the bottom shows seller count, and they share an X-axis. ── -->
+<div id="chart-modal" class="chart-modal hidden">
+  <div class="chart-modal-card" role="dialog" aria-modal="true">
+    <div class="chart-modal-header">
+      <div class="chart-modal-title">
+        <span class="chart-modal-asin" id="chart-modal-asin"></span>
+        <span class="chart-modal-name" id="chart-modal-name"></span>
+      </div>
+      <button class="chart-modal-close" id="chart-modal-close" title="閉じる">×</button>
+    </div>
+
+    <div class="chart-modal-body chart-modal-split">
+      <!-- LEFT: stats table (top) + stacked charts (below). Each chart
+           container has its own オートレンジ checkbox so price and
+           seller-count chart can be auto-ranged independently.
+           The stats table mirrors the Discord notification image
+           layout — 4 rows × 7 columns (header + 6 averages). -->
+      <div class="chart-stack">
+        <div class="chart-stats-table" id="chart-stats-table">
+          <!-- populated by renderer's renderChartStatsTable() -->
+        </div>
+        <div class="chart-container chart-container-price">
+          <div class="chart-row-toolbar">
+            <span class="chart-row-label">価格 [円]</span>
+            <label class="chart-autorange">
+              <input type="checkbox" id="chart-autorange-price" checked>
+              <span>オートレンジ</span>
+            </label>
+          </div>
+          <canvas class="chart-canvas chart-canvas-price" id="monitoring-chart-canvas"></canvas>
+        </div>
+        <div class="chart-container chart-container-count">
+          <div class="chart-row-toolbar">
+            <span class="chart-row-label">出品者数 [人]</span>
+            <label class="chart-autorange">
+              <input type="checkbox" id="chart-autorange-count" checked>
+              <span>オートレンジ</span>
+            </label>
+          </div>
+          <canvas class="chart-canvas chart-canvas-count" id="seller-count-canvas"></canvas>
+        </div>
+      </div>
+
+      <!-- RIGHT: legend + period selector. Per spec image 3:
+           - 実質価格 (●) and 他の出品価格 (■) are always shown.
+           - Five averages share one radio group; the selected one
+             renders as a dashed line on the price chart. Default 7d.
+           - 出品者数 (▲) is always shown on the bottom chart.
+           - 表示期間 radios drive both charts' X-axis simultaneously. -->
+      <aside class="chart-side-panel">
+        <div class="chart-legend chart-legend-vertical" id="chart-legend">
+          <div class="chart-legend-row" data-static="effective">
+            <span class="chart-legend-marker" style="--dot:#FF1493">●</span>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">実質価格</div>
+              <div class="chart-legend-sub">(BuyBox価格-ポイント)</div>
+              <div class="chart-legend-value" data-value="effective">—</div>
+            </div>
+          </div>
+          <div class="chart-legend-row" data-static="otherSellers">
+            <span class="chart-legend-marker" style="--dot:#D1D5DB">■</span>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">他の出品価格</div>
+              <div class="chart-legend-sub">(最新実質価格に対する割合)</div>
+              <div class="chart-legend-value" data-value="otherSellers">—</div>
+            </div>
+          </div>
+          <div class="chart-legend-section-title">平均期間 (1つ選択)</div>
+          <label class="chart-legend-row chart-legend-radio" data-avg="avg1d">
+            <input type="radio" name="chart-avg" value="avg1d">
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">1日平均</div>
+              <div class="chart-legend-sub">実質BuyBox価格<br>(最新実質価格に対する割合)</div>
+              <div class="chart-legend-value" data-value="avg1d">—</div>
+            </div>
+          </label>
+          <label class="chart-legend-row chart-legend-radio" data-avg="avg7d">
+            <input type="radio" name="chart-avg" value="avg7d" checked>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">7日平均</div>
+              <div class="chart-legend-sub">実質BuyBox価格<br>(最新実質価格に対する割合)</div>
+              <div class="chart-legend-value" data-value="avg7d">—</div>
+            </div>
+          </label>
+          <label class="chart-legend-row chart-legend-radio" data-avg="avg30d">
+            <input type="radio" name="chart-avg" value="avg30d">
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">30日平均</div>
+              <div class="chart-legend-sub">実質BuyBox価格<br>(最新実質価格に対する割合)</div>
+              <div class="chart-legend-value" data-value="avg30d">—</div>
+            </div>
+          </label>
+          <label class="chart-legend-row chart-legend-radio" data-avg="avg90d">
+            <input type="radio" name="chart-avg" value="avg90d">
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">90日平均</div>
+              <div class="chart-legend-sub">実質BuyBox価格<br>(最新実質価格に対する割合)</div>
+              <div class="chart-legend-value" data-value="avg90d">—</div>
+            </div>
+          </label>
+          <label class="chart-legend-row chart-legend-radio" data-avg="avg180d">
+            <input type="radio" name="chart-avg" value="avg180d">
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">180日平均</div>
+              <div class="chart-legend-sub">実質BuyBox価格<br>(最新実質価格に対する割合)</div>
+              <div class="chart-legend-value" data-value="avg180d">—</div>
+            </div>
+          </label>
+          <div class="chart-legend-row" data-static="sellerCount">
+            <span class="chart-legend-marker" style="--dot:#1E90FF">▲</span>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">出品者数</div>
+              <div class="chart-legend-value" data-value="sellerCount">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-period-box">
+          <div class="chart-period-title">表示期間</div>
+          <label class="chart-period-row"><input type="radio" name="chart-period" value="1d"><span>直近1日</span></label>
+          <label class="chart-period-row"><input type="radio" name="chart-period" value="1w" checked><span>直近7日</span></label>
+          <label class="chart-period-row"><input type="radio" name="chart-period" value="1m"><span>直近30日</span></label>
+          <label class="chart-period-row"><input type="radio" name="chart-period" value="3m"><span>直近90日</span></label>
+          <label class="chart-period-row"><input type="radio" name="chart-period" value="6m"><span>直近180日</span></label>
+          <label class="chart-period-row"><input type="radio" name="chart-period" value="all"><span>全期間</span></label>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- ── Axis editor (shown when user clicks a chart axis) ─────── -->
+<div id="axis-editor" class="axis-editor hidden">
+  <div class="axis-editor-card">
+    <div class="axis-editor-title" id="axis-editor-title"></div>
+    <div class="axis-editor-fields" id="axis-editor-fields"></div>
+    <div class="axis-editor-actions">
+      <button class="btn btn-secondary btn-sm" id="axis-editor-cancel">キャンセル</button>
+      <button class="btn btn-primary btn-sm"   id="axis-editor-apply">適用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── ASIN add modal (replaces the inline textarea) ───────────── -->
+<div id="asin-add-modal" class="generic-modal hidden">
+  <div class="generic-modal-card">
+    <div class="generic-modal-header">
+      <span>ASIN追加</span>
+      <button class="btn-link" id="asin-add-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <textarea id="asin-input" rows="6" placeholder="ASINを入力 (改行 or カンマ区切り)"></textarea>
+      <div id="add-status" class="asin-status hidden"></div>
+      <div class="generic-modal-actions">
+        <button id="btn-add" class="btn btn-primary">追加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 監視対象のASINの追加インポート modal ─────────────────────
+     Per spec: read the column whose row 1 == "ASIN", from row 2 to
+     last row. Skip blank rows; dedupe within the CSV (keep first
+     occurrence); products already in the viewer are silently
+     skipped; preserves CSV row order in the viewer. -->
+<div id="csv-import-modal" class="generic-modal hidden">
+  <div class="generic-modal-card">
+    <div class="generic-modal-header">
+      <span>監視対象のASINの追加インポート</span>
+      <button class="btn-link" id="csv-import-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <p class="csv-import-desc">監視対象に追加するASINをCSVファイルから読み込みます。</p>
+      <div class="csv-import-row">
+        <label class="btn btn-secondary csv-file-pick">
+          ファイルを選択
+          <input type="file" id="csv-file-input" accept=".csv,.txt" class="hidden">
+        </label>
+        <span id="csv-file-name" class="csv-file-name">選択されていません</span>
+      </div>
+      <div class="csv-import-rules">
+        ※ 1 行目に「ASIN」が入っている列の 2 行目以降を読み込みます<br>
+        ※ 既存の登録商品はそのまま残ります<br>
+        ※ 既存ASINと重複する行は無視されます<br>
+        ※ 途中の空白行は無視して最終行まで読み込みます<br>
+        ※ CSV内で重複するASINは最初の行のみ残します
+      </div>
+      <div id="csv-import-status" class="asin-status hidden"></div>
+      <div class="generic-modal-actions">
+        <button id="btn-csv-run" class="btn btn-primary" disabled>実行</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── フィルタ・通知・メンテナンス設定 modal (v2 spec) ──────────────
+     Three tabs (filter / maint / notif). Each tab has the same
+     "left frame" of conditions:
+       • 出品者数 ranges (現在 / 7日 / 30日 / 90日 / 180日 平均)
+       • ASIN/商品名 keyword include + exclude (space=AND, 、=OR)
+     The filter tab additionally has a "right frame" with two preset
+     slots (おススメフィルタ ①②) and 14 user-defined custom slots
+     (カスタムフィルタ ①〜⑭). Save captures the left-frame state into
+     a slot; 適用 reloads a slot back into the left frame.
+     Context-aware: when the viewer is in trash mode, the middle tab
+     becomes 自動完全削除 and state persists under separate keys. -->
+<div id="fnm-modal" class="generic-modal hidden">
+  <div class="generic-modal-card fnm-modal-card">
+    <div class="generic-modal-header fnm-modal-header">
+      <span class="fnm-modal-title-text" id="fnm-modal-title">絞り込み検索</span>
+      <span class="fnm-modal-hint" id="fnm-modal-hint">
+        「フィルタ実行」を押すと、左枠で✓を入れた各種条件を全て満たす商品のみ表示します。
+      </span>
+      <button class="btn-link fnm-modal-close" id="fnm-close" aria-label="閉じる">×</button>
+    </div>
+    <div class="fnm-modal-body">
+      <!-- Tab strip removed per spec: 自動メンテナンス & 通知設定 tabs
+           are unnecessary because each saved カスタムフィルタ slot has
+           its own 通知 / 自動ゴミ捨て toggles, allowing multiple
+           independent rules to run in parallel. Only the filter pane
+           remains. -->
+      <div class="fnm-tab-desc" id="fnm-tab-desc">
+        ☑チェックを入れた条件を全て満たした商品のみを絞り込み表示。
+        カスタムフィルタに保存して 通知/自動ゴミ捨て を ON にすると、
+        条件一致商品に対し自動で通知・ゴミ箱移動が走ります。
+      </div>
+
+      <!-- Two-pane layout: left = condition controls, right = saved
+           filter slots (only present on filter tab) -->
+      <div class="fnm-2pane">
+        <!-- LEFT PANE — condition controls -->
+        <div class="fnm-left-pane">
+          <!-- Top action bar -->
+          <div class="fnm-action-bar">
+            <button class="btn btn-ghost btn-sm" id="fnm-select-all">全選択</button>
+            <button class="btn btn-ghost btn-sm" id="fnm-deselect-all">全解除</button>
+            <button class="btn btn-primary fnm-apply-btn" id="fnm-apply">フィルタ実行</button>
+            <button class="btn btn-ghost btn-sm" id="fnm-reset">リセット</button>
+          </div>
+
+          <!-- 出品者数 ranges -->
+          <div class="fnm-section">
+            <div class="fnm-section-title">出品者数</div>
+            <div class="fnm-mpcount-grid" id="fnm-mpcount-grid">
+              <!-- populated by renderer: 5 rows × {checkbox, label, min, ~, max, 人} -->
+            </div>
+          </div>
+
+          <!-- 下落率 ranges (実質BuyBox価格) -->
+          <div class="fnm-section">
+            <div class="fnm-section-title">下落率 (実質BuyBox価格)</div>
+            <div class="fnm-section-hint">
+              平均期間分のデータが無い場合は、より短い平均期間にフォールバック。1日分も無い場合は全監視データの平均価格を使用します。
+            </div>
+            <div class="fnm-droprate-grid" id="fnm-droprate-grid">
+              <!-- populated by renderer: 6 rows × {checkbox, label, min ~ max, %} + formula sub-label -->
+            </div>
+          </div>
+
+          <!-- Keyword search / exclude -->
+          <div class="fnm-section">
+            <div class="fnm-section-title">キーワード検索</div>
+            <div class="fnm-section-hint">
+              複数の単語を空白「 」で繋ぐと AND 検索、カンマ「、」で繋ぐと OR 検索となります。
+            </div>
+            <div class="fnm-keyword-grid" id="fnm-keyword-grid">
+              <!-- populated by renderer -->
+            </div>
+          </div>
+
+          <!-- ポイント / ポイント率 conditions (legacy v1 — keep for
+               existing FNM rules; they are actual evaluator conditions
+               rather than UI-only filters) -->
+          <div class="fnm-section" id="fnm-legacy-section">
+            <div class="fnm-section-title">価格・ポイント条件</div>
+            <ul class="fnm-cond-list" id="fnm-cond-list">
+              <!-- populated by renderer (legacy point-range conditions) -->
+            </ul>
+          </div>
+        </div>
+
+        <!-- RIGHT PANE — saved filter slots (only on filter tab) -->
+        <div class="fnm-right-pane" id="fnm-right-pane">
+          <!-- おススメフィルタ presets (2 slots) -->
+          <div class="fnm-section">
+            <div class="fnm-section-title">おススメフィルタ</div>
+            <div class="fnm-section-hint">
+              「適用」ボタンを押せば左枠に各種条件を反映できます。
+            </div>
+            <div class="fnm-slot-list" id="fnm-preset-list"></div>
+          </div>
+
+          <!-- カスタムフィルタ ①〜⑭ -->
+          <div class="fnm-section">
+            <div class="fnm-section-title">カスタムフィルタ</div>
+            <div class="fnm-section-hint">
+              「保存」ボタンを押せば左枠の各種条件を保存できます。
+            </div>
+            <div class="fnm-slot-list" id="fnm-custom-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Discord webhook config — always visible. Used by every
+           custom-filter slot whose 通知 toggle is ON, so the URL is
+           an app-level setting now (not a per-tab setting). -->
+      <div id="fnm-discord-section" class="fnm-discord-section">
+        <div class="fnm-section-title">Discord 通知先</div>
+        <input type="url" id="discord-url" placeholder="https://discord.com/api/webhooks/…">
+        <div class="btn-row">
+          <button id="btn-save-discord" class="btn btn-primary btn-sm">URL保存</button>
+          <button id="btn-test-discord" class="btn btn-secondary btn-sm">テスト送信</button>
+        </div>
+        <div id="discord-status" class="hidden"></div>
+      </div>
+
+      <div class="fnm-footer-actions">
+        <button id="fnm-save" class="btn btn-primary">条件を保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Row-level group picker modal (登録 / 変更 buttons) ─────── -->
+<div id="row-group-modal" class="generic-modal hidden">
+  <div class="generic-modal-card" style="max-width:380px">
+    <div class="generic-modal-header">
+      <span>グループを選択</span>
+      <button class="btn-link" id="row-group-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <div class="row-group-target" id="row-group-target"></div>
+      <ul id="row-group-list" class="row-group-list"></ul>
+    </div>
+  </div>
+</div>
+
+<!-- ── 通知履歴 modal ─────────────────────────────────────────── -->
+<div id="history-modal" class="generic-modal hidden">
+  <div class="generic-modal-card" style="max-width:560px">
+    <div class="generic-modal-header">
+      <span>通知履歴</span>
+      <button class="btn-link" id="history-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <div id="notification-list" class="list-container"></div>
+    </div>
+  </div>
+</div>
+
+<script src="chart-renderer.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>

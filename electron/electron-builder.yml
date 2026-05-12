@@ -10,11 +10,20 @@ files:
   - assets/**/*
   - package.json
 
+# better-sqlite3 ships a native `.node` binary that Node cannot load
+# from inside an asar archive — the file has to sit on the real
+# filesystem at runtime. asarUnpack extracts the whole package out
+# of the archive during packaging so `require('better-sqlite3')`
+# works at runtime without any user-facing error.
+asarUnpack:
+  - "node_modules/better-sqlite3/**/*"
+
 win:
   target:
     - target: nsis
       arch: [x64]
-  icon: assets/icon.ico
+  # Uncomment after placing an .ico (256×256 recommended) at assets/icon.ico
+  # icon: assets/icon.ico
   artifactName: "${productName}-${version}-win.${ext}"
 
 nsis:
@@ -26,14 +35,10 @@ mac:
   target:
     - target: dmg
       arch: [x64, arm64]
-  icon: assets/icon.icns
+  # Uncomment after placing a matching .icns at assets/icon.icns
+  # icon: assets/icon.icns
   category: public.app-category.finance
   artifactName: "${productName}-${version}-mac.${ext}"
 
 dmg:
   artifactName: "${productName}-${version}.dmg"
-
-# better-sqlite3 is a native module — electron-builder must include
-# the correct prebuilt binary for the target platform.
-electronDownload:
-  mirror: "https://github.com/nicedoc/electron/releases/download/v"

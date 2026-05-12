@@ -6,11 +6,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 // doesn't prevent the bridge from being exposed at all.
 let IPC_CHANNEL = 'app-action';
 let PUSH = {
-  PRICE_UPDATE:   'price-update',
-  CYCLE_PROGRESS: 'cycle-progress',
-  CYCLE_COMPLETE: 'cycle-complete',
-  CAPTCHA_PAUSE:  'captcha-pause',
-  CAPTCHA_RESUME: 'captcha-resume',
+  PRICE_UPDATE:    'price-update',
+  CYCLE_PROGRESS:  'cycle-progress',
+  CYCLE_COMPLETE:  'cycle-complete',
+  CAPTCHA_PAUSE:   'captcha-pause',
+  CAPTCHA_RESUME:  'captcha-resume',
+  CIRCUIT_BREAKER: 'circuit-breaker',
+  LOGIN_STATE:     'login-state',
 };
 try {
   const c = require('../shared/constants');
@@ -23,11 +25,13 @@ try {
 contextBridge.exposeInMainWorld('api', {
   invoke: (action, payload) => ipcRenderer.invoke(IPC_CHANNEL, { action, ...payload }),
 
-  onPriceUpdate:   (cb) => ipcRenderer.on(PUSH.PRICE_UPDATE,   (_e, d) => cb(d)),
-  onCycleProgress: (cb) => ipcRenderer.on(PUSH.CYCLE_PROGRESS, (_e, d) => cb(d)),
-  onCycleComplete: (cb) => ipcRenderer.on(PUSH.CYCLE_COMPLETE, (_e, d) => cb(d)),
-  onCaptchaPause:  (cb) => ipcRenderer.on(PUSH.CAPTCHA_PAUSE,  (_e, d) => cb(d)),
-  onCaptchaResume: (cb) => ipcRenderer.on(PUSH.CAPTCHA_RESUME, (_e, d) => cb(d)),
+  onPriceUpdate:    (cb) => ipcRenderer.on(PUSH.PRICE_UPDATE,    (_e, d) => cb(d)),
+  onCycleProgress:  (cb) => ipcRenderer.on(PUSH.CYCLE_PROGRESS,  (_e, d) => cb(d)),
+  onCycleComplete:  (cb) => ipcRenderer.on(PUSH.CYCLE_COMPLETE,  (_e, d) => cb(d)),
+  onCaptchaPause:   (cb) => ipcRenderer.on(PUSH.CAPTCHA_PAUSE,   (_e, d) => cb(d)),
+  onCaptchaResume:  (cb) => ipcRenderer.on(PUSH.CAPTCHA_RESUME,  (_e, d) => cb(d)),
+  onCircuitBreaker: (cb) => ipcRenderer.on(PUSH.CIRCUIT_BREAKER, (_e, d) => cb(d)),
+  onLoginState:     (cb) => ipcRenderer.on(PUSH.LOGIN_STATE,     (_e, d) => cb(d)),
 });
 
 console.log('[preload] api bridge exposed');

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <!-- Inline scripts in this file orchestrate chart rendering, so we
+       must allow 'unsafe-inline' for scripts. The page is offscreen,
+       loaded only by main process for image capture, so the relaxed
+       policy doesn't widen any user-facing attack surface. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';">
+  <title>chart-render</title>
+  <style>
+    :root {
+      --bg:        #080813;
+      --bg-2:      rgba(15,15,30,.95);
+      --text:      #e6e6f0;
+      --text-2:    #a0a0b0;
+      --text-3:    #6a6a7e;
+      --accent:    #ff9900;
+      --price-color: #ffd56b;
+      /* 色分けはアプリ本体 / Discord 通知テキストと統一 (2026-05):
+         正値 (= 価格下落) → 赤、負値 (= 価格上昇) → 青。 */
+      --neg:       #5b9eff;
+      --pos:       #fc8181;
+    }
+    html, body {
+      margin: 0;
+      width: 820px;
+      height: 600px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
+                   "Meiryo", sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── 4-row × 7-col stats table — spec image layout ──────── */
+    .stats-wrap {
+      padding: 10px 14px 6px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 70px repeat(6, 1fr);
+      gap: 4px 10px;
+      align-items: center;
+      font-size: 13px;
+      line-height: 1.3;
+    }
+    .stats-cell {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .stats-cell.label {
+      text-align: left;
+      font-weight: 600;
+      color: var(--text-2);
+    }
+    .stats-cell.header {
+      text-align: center;
+      font-weight: 700;
+      color: var(--text-2);
+      font-size: 12px;
+      padding-bottom: 2px;
+      border-bottom: 1px solid rgba(255,255,255,.10);
+    }
+    .stats-cell.value-price {
+      color: var(--price-color);
+      font-weight: 700;
+    }
+    .stats-cell.pos { color: var(--pos); font-weight: 600; }
+    .stats-cell.neg { color: var(--neg); font-weight: 600; }
+    .stats-cell.flat { color: var(--text-3); }
+
+    /* ── Chart rows (existing layout) ───────────────────────── */
+    .row {
+      padding: 6px 14px 4px;
+    }
+    .row-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-2);
+      letter-spacing: .3px;
+      margin-bottom: 4px;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+    }
+    #c-price { height: 220px; }
+    #c-count { height: 110px; }
+  </style>
+</head>
+<body>
+  <!-- Stats table populated by JS. Mirrors the spec image: 4 rows
+       (header / 価格 / 差額 / 下落率) × 7 cols (label + 実質最新価格
+       + 1日 + 7日 + 30日 + 90日 + 180日). -->
+  <div class="stats-wrap">
+    <div class="stats-grid" id="stats-grid"></div>
+  </div>
+
+  <div class="row">
+    <div class="row-title">価格 [円]</div>
+    <canvas id="c-price"></canvas>
+  </div>
+  <div class="row">
+    <div class="row-title">出品者数 [人]</div>
+    <canvas id="c-count"></canvas>
+  </div>
+
+  <script src="chart-renderer.js"></script>
+  <script>
+    'use strict';
+    // Match the in-app chart modal exactly — same shapes, colors, and
+    // step-line semantics so the notification looks identical to what
+    // the user sees inside the app.
+    const COLOR_EFFECTIVE = '#FF1493';   // 実質価格 (magenta circle)
+    const COLOR_OTHER     = '#D1D5DB';   // 他の出品価格 (light-grey square)
+    const COLOR_SELLERS   = '#1E90FF';   // 出品者数 (blue triangle)
+
+    let priceChart = null;
+    let countChart = null;
+
+    // ── Stats table builder ────────────────────────────────────
+    // Renders a 4-row × 7-col CSS grid mirroring the spec image:
+    //   header:   ""   実質最新価格  1日平均  7日平均  30日平均  90日平均  180日平均
+    //   価格:     "価格"  ¥X,XXX     ¥X,XXX   ¥X,XXX   ...
+    //   差額:     "差額"  —          ±N       ±N       ...    (— for current vs current)
+    //   下落率:   "下落率" —         ±N.N%    ±N.N%    ...
+    // Coloring follows the buyer's perspective: positive (avg above
+    // latest = latest is cheaper) → blue 「お得」, negative (avg below
+    // latest = latest is pricier) → red 「割高」, zero → grey.
+    function fmtYen(v) {
+      return (v == null || !isFinite(v))
+        ? '—'
+        : '¥' + Number(Math.round(v)).toLocaleString('ja-JP');
+    }
+    function fmtDiff(d) {
+      if (d == null || !isFinite(d)) return '—';
+      return '¥' + (d > 0 ? '+' : '') + d.toLocaleString('ja-JP');
+    }
+    function fmtPct(avg, latestEff) {
+      if (avg == null || !isFinite(avg) || avg === 0 || latestEff == null) return '—';
+      const p = (avg - latestEff) / avg * 100;
+      return (p > 0 ? '+' : '') + p.toFixed(1) + '%';
+    }
+    function signClass(v) {
+      if (v == null || !isFinite(v)) return 'flat';
+      if (v > 0) return 'pos';
+      if (v < 0) return 'neg';
+      return 'flat';
+    }
+
+    function renderStatsTable(stats, latestEff) {
+      const grid = document.getElementById('stats-grid');
+      const cells = [];
+      // 実質最新価格列の差額/下落率は「1個前の監視価格 − 最新価格」=
+      // 瞬間下落価格 / 瞬間下落率 (クライアント要望、2026-05)。stats.
+      // prevEffective が無い (観測 1 件目の新規商品) 場合は diff = null
+      // → '—' 表示にフォールバック。pct も同じ ref で計算する。
+      const prevEff      = (stats && stats.prevEffective != null) ? stats.prevEffective : null;
+      const instantDiff  = (prevEff != null && latestEff != null) ? (prevEff - latestEff) : null;
+      const cols = [
+        { hdr: '実質最新価格', val: latestEff,    ref: prevEff,       diff: instantDiff       },
+        { hdr: '1日平均',      val: stats.avg1d,   ref: stats.avg1d,   diff: stats.avg1dDiff   },
+        { hdr: '7日平均',      val: stats.avg7d,   ref: stats.avg7d,   diff: stats.avg7dDiff   },
+        { hdr: '30日平均',     val: stats.avg30d,  ref: stats.avg30d,  diff: stats.avg30dDiff  },
+        { hdr: '90日平均',     val: stats.avg90d,  ref: stats.avg90d,  diff: stats.avg90dDiff  },
+        { hdr: '180日平均',    val: stats.avg180d, ref: stats.avg180d, diff: stats.avg180dDiff },
+      ];
+
+      // pct はカラムごとに ref が異なるため、ここで統一計算する
+      // (= diff / ref × 100)。fmtPct は val と latestEff を取る古い API
+      // のままだと実質最新列で latest ÷ prev の % 計算ができないので
+      // ここで明示的に算出する。
+      const fmtPctRef = (diff, ref) => {
+        if (diff == null || ref == null || !isFinite(ref) || ref === 0) return '—';
+        const p = (diff / ref) * 100;
+        return (p > 0 ? '+' : '') + p.toFixed(1) + '%';
+      };
+
+      // Header row — empty corner + 6 column headers
+      cells.push('<div class="stats-cell header"></div>');
+      for (const c of cols) {
+        cells.push(`<div class="stats-cell header">${c.hdr}</div>`);
+      }
+
+      // 価格 row
+      cells.push('<div class="stats-cell label">価格</div>');
+      for (const c of cols) {
+        cells.push(`<div class="stats-cell value-price">${fmtYen(c.val)}</div>`);
+      }
+
+      // 差額 row — 実質最新列も瞬間下落価格を出す (null なら '—')
+      cells.push('<div class="stats-cell label">差額</div>');
+      for (const c of cols) {
+        cells.push(`<div class="stats-cell ${signClass(c.diff)}">${fmtDiff(c.diff)}</div>`);
+      }
+
+      // 下落率 row — 同様に瞬間下落率を出す
+      cells.push('<div class="stats-cell label">下落率</div>');
+      for (const c of cols) {
+        cells.push(`<div class="stats-cell ${signClass(c.diff)}">${fmtPctRef(c.diff, c.ref)}</div>`);
+      }
+
+      grid.innerHTML = cells.join('');
+    }
+
+    // ── Chart renderer (unchanged from prior version) ──────────
+    window.chartRender.onRender((msg) => {
+      // 1. Render stats table at top
+      renderStatsTable(msg.stats || {}, msg.latestEff);
+
+      // 2. Render the two TimeSeriesCharts below
+      const priceCanvas = document.getElementById('c-price');
+      const countCanvas = document.getElementById('c-count');
+
+      if (!priceChart) {
+        priceChart = new TimeSeriesChart(priceCanvas, {
+          yFormatter: (v) => '¥' + Math.round(v).toLocaleString(),
+          autoRange: true,
+        });
+        countChart = new TimeSeriesChart(countCanvas, {
+          yFormatter: (v) => String(Math.round(v)),
+          autoRange: true,
+          // 出品者数 is an integer count; never let the tick fall
+          // below 1 person, which would produce 10.5/11.5 labels.
+          minTick: 1,
+        });
+      }
+
+      const priceSeries = [
+        { color: COLOR_EFFECTIVE, lineWidth: 2,
+          points: msg.data.effective || [],
+          stepLine: true, pointShape: 'circle', markerSize: 4 },
+        { color: COLOR_OTHER, lineWidth: 1.6,
+          points: msg.data.otherSellers || [],
+          stepLine: true, pointShape: 'square', markerSize: 3.5 },
+        { color: COLOR_EFFECTIVE, lineWidth: 1.4,
+          points: msg.data[msg.avgKey] || [],
+          dashed: true, showDots: false },
+      ];
+      const countSeries = [{
+        color: COLOR_SELLERS, lineWidth: 1.8,
+        points: msg.data.sellerCount || [],
+        stepLine: true, pointShape: 'triangle', markerSize: 4.5,
+      }];
+
+      priceChart.setSeries(priceSeries, msg.from, msg.to);
+      countChart.setSeries(countSeries, msg.from, msg.to);
+
+      // Two rAFs to ensure ResizeObserver has fired and the rendered
+      // pixels are fully committed before the main process captures.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.chartRender.signalReady();
+        });
+      });
+    });
+  </script>
+</body>
+</html>

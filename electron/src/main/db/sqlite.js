@@ -1,54 +1,55 @@
 'use strict';
 
 const path = require('path');
-const fs = require('fs');
 const { app } = require('electron');
+const Database = require('better-sqlite3');
 const { runMigrations } = require('./migrations');
 
 let db = null;
 let dbPath = null;
-let saveTimer = null;
 
-// sql.js loads WebAssembly asynchronously on first call. After that,
-// the API is fully synchronous — same usage pattern as better-sqlite3.
-let SQL = null;
+// Prepared-statement cache keyed on SQL text. better-sqlite3 prepared
+// statements are heavy to build but cheap to execute, so caching by SQL
+// string lets call sites keep their "prepare(sql).run(...)" inline style
+// without paying the prepare cost on every call — a measurable win in
+// hot loops like insertObservationsBatch at 10k-ASIN scale.
+const stmtCache = new Map();
 
 function getDbPath() {
   const userDataDir = app.getPath('userData');
   return path.join(userDataDir, 'amazon-monitor.db');
 }
 
-async function initDb() {
+// Synchronous with better-sqlite3 — opens the file (creating it if
+// missing) and returns immediately. No WASM load, no async import,
+// no deferred init. Caller still uses `await` for backwards-compat
+// but the await is a no-op.
+function initDb() {
   if (db) return db;
 
-  // Load the sql.js WASM binary (one-time async init).
-  if (!SQL) {
-    const initSqlJs = require('sql.js');
-    SQL = await initSqlJs();
-  }
-
   dbPath = getDbPath();
+  db = new Database(dbPath);
 
-  // Load existing database from disk, or create a new one.
-  if (fs.existsSync(dbPath)) {
-    const fileBuffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(fileBuffer);
-    console.log(`[sqlite] opened existing ${dbPath}`);
-  } else {
-    db = new SQL.Database();
-    console.log(`[sqlite] created new ${dbPath}`);
-  }
+  // Performance & correctness pragmas.
+  //
+  // journal_mode=WAL: concurrent read during write, required at 10k
+  //   scale. The old sql.js build silently ignored this pragma.
+  // synchronous=NORMAL: safe with WAL, ~2× faster than FULL on writes.
+  // foreign_keys=ON: enforce referential integrity.
+  // cache_size=-20000: 20 MB page cache (negative = kibibytes).
+  // mmap_size=256 MB: memory-map the read pages, avoids many syscalls
+  //   on the hot observation indices.
+  // temp_store=MEMORY: temp tables & indexes in RAM, not tmp file.
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('foreign_keys = ON');
+  db.pragma('cache_size = -20000');
+  db.pragma('mmap_size = 268435456');
+  db.pragma('temp_store = MEMORY');
 
-  // WAL mode isn't available in sql.js (it runs in-memory with manual
-  // saves), but we enable it anyway — it's silently ignored.
-  try { db.run('PRAGMA journal_mode = WAL'); } catch {}
-  try { db.run('PRAGMA foreign_keys = ON'); } catch {}
+  console.log(`[sqlite] opened ${dbPath}`);
 
   runMigrations(db);
-
-  // Auto-save to disk every 10 seconds so data survives crashes.
-  startAutoSave();
-
   return db;
 }
 
@@ -57,119 +58,44 @@ function getDb() {
   return db;
 }
 
-function saveToDisk() {
-  if (!db || !dbPath) return;
-  try {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    // Write to a temp file first, then rename — atomic write.
-    const tmpPath = dbPath + '.tmp';
-    fs.writeFileSync(tmpPath, buffer);
-    fs.renameSync(tmpPath, dbPath);
-  } catch (err) {
-    console.error('[sqlite] save failed:', err.message);
-  }
-}
-
-function startAutoSave() {
-  if (saveTimer) return;
-  saveTimer = setInterval(saveToDisk, 10000);
-}
-
 function closeDb() {
-  if (saveTimer) {
-    clearInterval(saveTimer);
-    saveTimer = null;
-  }
   if (db) {
-    saveToDisk(); // final save
+    // Force any pending WAL frames to the main DB file before exit so
+    // the next launch sees a clean checkpoint, not a growing -wal file.
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+    stmtCache.clear();
     db.close();
     db = null;
     console.log('[sqlite] closed');
   }
 }
 
-// ── Compatibility wrapper ───────────────────────────────────
-//
-// sql.js has a different API than better-sqlite3. This wrapper provides
-// a `.prepare(sql)` method that returns an object with `.run()`,
-// `.get()`, `.all()` methods matching better-sqlite3's interface, so
-// queries.js can use the same code for both.
-
+// Cached prepare — returns a better-sqlite3 Statement whose .run/.get/.all
+// shape matches exactly what the sql.js compatibility wrapper used to
+// return, so queries.js needed no edits.
 function prepare(sql) {
-  return {
-    run(...params) {
-      const flat = flattenParams(params);
-      getDb().run(sql, flat);
-      // Return an object mimicking better-sqlite3's RunResult.
-      return {
-        changes: getDb().getRowsModified(),
-        lastInsertRowid: getLastInsertRowId(),
-      };
-    },
-
-    get(...params) {
-      const flat = flattenParams(params);
-      const stmt = getDb().prepare(sql);
-      stmt.bind(flat);
-      let row = null;
-      if (stmt.step()) {
-        row = stmt.getAsObject();
-      }
-      stmt.free();
-      return row || undefined;
-    },
-
-    all(...params) {
-      const flat = flattenParams(params);
-      const stmt = getDb().prepare(sql);
-      stmt.bind(flat);
-      const rows = [];
-      while (stmt.step()) {
-        rows.push(stmt.getAsObject());
-      }
-      stmt.free();
-      return rows;
-    },
-  };
-}
-
-function getLastInsertRowId() {
-  try {
-    const stmt = getDb().prepare('SELECT last_insert_rowid() AS id');
-    stmt.step();
-    const row = stmt.getAsObject();
-    stmt.free();
-    return row.id;
-  } catch {
-    return 0;
+  let stmt = stmtCache.get(sql);
+  if (!stmt) {
+    stmt = getDb().prepare(sql);
+    stmtCache.set(sql, stmt);
   }
+  return stmt;
 }
 
-// sql.js expects params as a flat array. If the caller passes them as
-// individual arguments (better-sqlite3 style), flatten.
-function flattenParams(params) {
-  if (params.length === 0) return [];
-  if (params.length === 1 && Array.isArray(params[0])) return params[0];
-  return params;
-}
-
-// Expose a transaction helper that matches better-sqlite3's pattern:
-//   const tx = transaction((args) => { ... });
-//   tx(args);
+// better-sqlite3 has native transaction support — wraps fn so the SQL
+// inside runs inside a BEGIN/COMMIT/ROLLBACK block automatically.
+// Same call shape as the old sql.js helper (`const tx = transaction(fn); tx(args)`).
 function transaction(fn) {
-  return function (...args) {
-    const d = getDb();
-    d.run('BEGIN');
-    try {
-      const result = fn(...args);
-      d.run('COMMIT');
-      return result;
-    } catch (err) {
-      d.run('ROLLBACK');
-      throw err;
-    }
-  };
+  return getDb().transaction(fn);
+}
+
+// No-op. With sql.js the whole DB was in memory and had to be serialised
+// to disk on a timer; with better-sqlite3 every committed write is
+// already durable on the WAL, so this function exists only so callers
+// in queries.js / retention.js don't need to change. Delete the calls
+// at leisure — they harm nothing.
+function saveToDisk() {
+  // intentional no-op
 }
 
 module.exports = { initDb, getDb, closeDb, prepare, transaction, saveToDisk };

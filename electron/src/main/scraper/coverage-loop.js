@@ -9,6 +9,8 @@ const {
   AMAZON_BASE,
   JA_LANG_QUERY,
   BATCH_SIZE,
+  BATCH_SIZE_MIN,
+  BATCH_SIZE_MAX,
   MAX_COVERAGE_ATTEMPTS,
 } = require('../../shared/constants');
 
@@ -38,7 +40,7 @@ function buildSearchUrl(asins) {
 // page so the UI can update a progress bar.
 //
 // Returns { total, found, missed, pages, errors }.
-async function runCoverageLoop(allAsins, { onPageResult, onProgress } = {}) {
+async function runCoverageLoop(allAsins, { onPageResult, onProgress, signal } = {}) {
   if (!allAsins || allAsins.length === 0) {
     return { total: 0, found: 0, missed: 0, pages: 0, errors: 0 };
   }
@@ -47,8 +49,19 @@ async function runCoverageLoop(allAsins, { onPageResult, onProgress } = {}) {
   const totalAsins = allAsins.length;
   let pageCount = 0;
   let errorCount = 0;
+  const aborted = () => signal && signal.aborted;
+  const result = (extra = {}) => ({
+    total: totalAsins,
+    found: totalAsins - unseen.size,
+    missed: unseen.size,
+    pages: pageCount,
+    errors: errorCount,
+    ...extra,
+  });
 
-  // Estimate total pages for progress reporting.
+  // Estimate total pages for progress reporting. Uses the mean batch
+  // size and the ~1/3 show-ratio to project how many HTTP requests a
+  // full coverage sweep will need.
   const estimatedPages = Math.ceil(totalAsins / (BATCH_SIZE / 3));
 
   // Process in waves. Each wave takes all currently-unseen ASINs,
@@ -57,19 +70,38 @@ async function runCoverageLoop(allAsins, { onPageResult, onProgress } = {}) {
   // in the next wave.
   let wave = 0;
   while (unseen.size > 0 && wave < MAX_COVERAGE_ATTEMPTS) {
+    if (aborted()) {
+      console.info('[coverage] aborted between waves');
+      return result({ aborted: true });
+    }
     wave++;
-    const waveAsins = [...unseen];
-    const batches = chunk(waveAsins, BATCH_SIZE);
+    // Shuffle each wave so consecutive cycles don't re-issue the same
+    // URL text, and use a jittered batch size so "135 items in k="
+    // isn't a constant signature Amazon's WAF can cache-match on.
+    const waveAsins = shuffle([...unseen]);
+    const batches = chunkRandom(waveAsins, BATCH_SIZE_MIN, BATCH_SIZE_MAX);
 
     for (const batch of batches) {
+      if (aborted()) {
+        console.info('[coverage] aborted between batches');
+        return result({ aborted: true });
+      }
       if (isPaused()) {
         // If we're in a CAPTCHA pause, stop the loop. The scheduler
         // will restart it after the pause lifts.
-        return { total: totalAsins, found: totalAsins - unseen.size, missed: unseen.size, pages: pageCount, errors: errorCount, paused: true };
+        return result({ paused: true });
       }
 
       const url = buildSearchUrl(batch);
-      const response = await fetchPage(url);
+      const response = await fetchPage(url, { signal });
+
+      // ABORTED means stop() was hit during awaitFetchSlot or the
+      // in-flight HTTP fetch. Bail without counting the page as an
+      // error or pushing a partial result.
+      if (response.error === 'ABORTED' || aborted()) {
+        console.info('[coverage] aborted mid-batch');
+        return result({ aborted: true });
+      }
 
       pageCount++;
 
@@ -148,6 +180,29 @@ function chunk(arr, size) {
     result.push(arr.slice(i, i + size));
   }
   return result;
+}
+
+// Split into batches whose size is drawn uniformly from [min, max] per
+// batch, not a fixed value. Breaks per-URL signature hashing.
+function chunkRandom(arr, min, max) {
+  const result = [];
+  let i = 0;
+  while (i < arr.length) {
+    const size = min + Math.floor(Math.random() * (max - min + 1));
+    result.push(arr.slice(i, i + size));
+    i += size;
+  }
+  return result;
+}
+
+// Fisher–Yates shuffle, returns a new array.
+function shuffle(arr) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 module.exports = { runCoverageLoop, buildSearchUrl };
