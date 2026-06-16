@@ -25,6 +25,11 @@ class TimeSeriesChart {
 
     this.userY = null;     // { min, max, tick } — set via setYAxis
     this.autoRange = !!opts.autoRange;   // spec auto-range formula
+    // 「最小値ゼロ」モード (2026-06 client spec): 最大値はデータから自動
+    // 計算したまま、最小値を 0 に固定、メモリ間隔は (max ÷ 10) = 10 段。
+    // autoRange / userY 両方より優先度高。チェック ON で「価格 0 円
+    // を基準とした全体感」が見える表示に切り替わる。
+    this.minZero = !!opts.minZero;
     // Minimum Y-axis tick interval. Used to prevent fractional ticks on
     // integer-only data (e.g., the seller-count chart should never show
     // 10.5 / 11.5 — clamp tick ≥ 1 so labels stay whole numbers).
@@ -46,6 +51,14 @@ class TimeSeriesChart {
   setAutoRange(on) {
     this.autoRange = !!on;
     if (this.autoRange) this.userY = null;
+    this.draw();
+  }
+
+  // 「最小値ゼロ」モードのオンオフ。autoRange より優先される
+  // (= ON の間は userY も無視)。OFF にすると元のレンジ計算経路に戻る。
+  setMinZero(on) {
+    this.minZero = !!on;
+    if (this.minZero) this.userY = null;
     this.draw();
   }
 
@@ -166,6 +179,15 @@ class TimeSeriesChart {
       ctx.lineTo(x - r, y + r);
       ctx.closePath();
       ctx.fill();
+    } else if (shape === 'diamond') {
+      // 新品出品数(取込) (項目9) 用の菱形 — 三角(出品者数)と区別。
+      ctx.beginPath();
+      ctx.moveTo(x, y - r);
+      ctx.lineTo(x + r, y);
+      ctx.lineTo(x, y + r);
+      ctx.lineTo(x - r, y);
+      ctx.closePath();
+      ctx.fill();
     } else {
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -222,7 +244,20 @@ class TimeSeriesChart {
 
     // ── Y range ─────────────────────────────────────────────
     let yMin, yMax, yTick;
-    if (this.userY && this.userY.min != null && this.userY.max != null) {
+    if (this.minZero && allValues.length > 0) {
+      // 「最小値ゼロ」モード (2026-06 client spec):
+      //   - 最小値: 0 固定
+      //   - 最大値: データの実最大値そのまま (= ヘッドルームなし)
+      //   - メモリ間隔: max / 10 = ちょうど 10 段
+      // ※ minTick (整数値強制用) が指定されていれば下限として適用。
+      const dMax = Math.max(...allValues);
+      yMin  = 0;
+      yMax  = dMax > 0 ? dMax : 1;
+      yTick = yMax / 10;
+      if (this.minTick != null && yTick < this.minTick) {
+        yTick = this.minTick;
+      }
+    } else if (this.userY && this.userY.min != null && this.userY.max != null) {
       yMin = this.userY.min;
       yMax = this.userY.max;
       yTick = this.userY.tick || this._niceTick(yMax - yMin, 5);
@@ -361,7 +396,9 @@ class TimeSeriesChart {
             else         ctx.lineTo(x, y);
           }
         }
-        ctx.stroke();
+        // dotsOnly (項目14: Ama本体価格): 点が疎で不規則なため連結線は描かず
+        // ドットのみ表示する (線を引くと連続価格に見えてしまう)。
+        if (!s.dotsOnly) ctx.stroke();
         ctx.setLineDash([]);
 
         // Per-point markers. Skip if explicitly disabled, or if no shape
@@ -562,10 +599,12 @@ class Sparkline {
   // 180日」など期間を選んだ時、その期間でレンジを固定して、データが
   // 揃っていない期間は空白として描画する。null/undefined を渡せば従来
   // 通りデータの最古〜最新でフィット。
-  setData(points, xMin, xMax) {
+  setData(points, xMin, xMax, minZero) {
     this.points = Array.isArray(points) ? points : [];
     this._xMin = (typeof xMin === 'number' && isFinite(xMin)) ? xMin : null;
     this._xMax = (typeof xMax === 'number' && isFinite(xMax)) ? xMax : null;
+    // 縦軸最小値ゼロ固定 (項目24) — 詳細グラフの minZero と同じ。
+    this._minZero = !!minZero;
     this.draw();
   }
 
@@ -660,10 +699,14 @@ class Sparkline {
     // range so the line draws in the middle of the canvas instead of
     // pinned to the very bottom edge where it competes with rounded
     // corners and the cell border.
-    let vLo = vMin, vHi = vMax;
+    // 縦軸最小値ゼロ固定 (項目24): minZero のとき下限を 0 に固定する
+    // (価格は >= 0 前提)。それ以外は従来通りデータ範囲にフィット。
+    let vLo = this._minZero ? 0 : vMin;
+    let vHi = vMax;
     if (vHi === vLo) {
       const pad = Math.max(1, Math.abs(vHi) * 0.02);
-      vLo -= pad; vHi += pad;
+      if (!this._minZero) vLo -= pad;
+      vHi += pad;
     }
     const vRange = vHi - vLo || 1;
 

@@ -1,6 +1,6 @@
 {
   "name": "amazon-price-monitor",
-  "version": "1.0.0",
+  "version": "1.1.7",
   "description": "Amazon.co.jp price monitor — desktop app",
   "main": "src/main/index.js",
   "scripts": {
@@ -8,8 +8,10 @@
     "dev": "electron .",
     "postinstall": "electron-rebuild -f -w better-sqlite3",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
-    "build:win": "electron-builder --win --x64",
-    "build:dir": "electron-builder --dir",
+    "build:crawler": "cargo build --release --manifest-path crawler/Cargo.toml && node scripts/copy-crawler.js",
+    "build:win": "npm run build:crawler && electron-builder --win --x64",
+    "build:mac": "npm run build:crawler && electron-builder --mac",
+    "build:dir": "npm run build:crawler && electron-builder --dir",
     "test:screenshot": "node scripts/test-screenshot.js"
   },
   "dependencies": {

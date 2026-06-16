@@ -55,8 +55,17 @@ const CIRCUIT_BREAKER_INTERVAL_MS = 30_000;                 // 30 s between requ
 // ── Data retention ──────────────────────────────────────────
 
 const RETENTION_FULL_DAYS  = 7;    // keep every observation
-const RETENTION_DAILY_DAYS = 180;  // keep daily averages
-// Day 181+ → deleted entirely.
+// 2026-06 spec 項目27: 監視データの最大保持期間を 180→90 日に短縮 (重要仕様変更)。
+// 90 日より古い日次集計は削除される。※「180日平均実質BuyBox」列は残す
+// (項目28 で CSV/Keepa 取込値を表示。監視 180 日平均は計算しない)。
+const RETENTION_DAILY_DAYS = 90;   // keep daily averages
+// Day 91+ → deleted entirely.
+
+// 出品者数の保持期間 (2026-06 client spec): クロール頻度の高いデータが
+// 巨大化しないよう、30 日より古い observations 行の mp_count 値だけ
+// NULL に上書きする (= 行自体は通常 retention で 7 日で集計済み)。
+// 日次集計の avg_mp_count は 30 日より古いものは NULL にする。
+const RETENTION_MP_COUNT_DAYS = 30;
 
 // ── IPC channel ─────────────────────────────────────────────
 
@@ -91,6 +100,7 @@ module.exports = {
   CIRCUIT_BREAKER_INTERVAL_MS,
   RETENTION_FULL_DAYS,
   RETENTION_DAILY_DAYS,
+  RETENTION_MP_COUNT_DAYS,
   IPC_CHANNEL,
   PUSH,
 };

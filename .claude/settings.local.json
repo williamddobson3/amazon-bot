@@ -18,7 +18,25 @@
       "Bash(node --check src/services/coordinator.js)",
       "Bash(node --check src/services/evaluator.js)",
       "Bash(node --check src/ws/handlers.js)",
-      "Bash(node --check src/api/observations.js)"
+      "Bash(node --check src/api/observations.js)",
+      "Bash(python -c ' *)",
+      "Read(//c/Users/china/AppData/Local/Temp/client-docs2/zukai/xl/worksheets/**)",
+      "Read(//c/Users/china/AppData/Local/Temp/client-docs2/zukai/xl/media/**)",
+      "Read(//c/Users/china/AppData/Local/Temp/client-docs2/zukai/xl/**)",
+      "Bash(node -e \"require\\('./src/main/services/screenshot.js'\\); console.log\\('screenshot.js loads'\\)\")",
+      "Bash(node -c src/main/index.js)",
+      "Bash(node -c src/main/services/notifier.js)",
+      "Bash(node -c src/main/services/screenshot.js)",
+      "Bash(node -c src/main/ipc-handlers.js)",
+      "Bash(node -c src/renderer/renderer.js)",
+      "Bash(rm -rf dist)",
+      "Bash(npm run *)",
+      "Bash(cd \"c:/Users/china/Videos/amazon-bot/electron\" && rm -rf dist 2>&1; npm run build:win 2>&1 | tail -12)",
+      "Bash(cargo --version)",
+      "Bash(rustc --version)",
+      "Bash(rustup --version)",
+      "PowerShell(Get-Process | Where-Object { $_.Name -match \"crawler|Amazon\" } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1; $env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; Set-Location \"c:\\\\Users\\\\china\\\\Videos\\\\amazon-bot\\\\electron\"; if \\(Test-Path dist\\) { Remove-Item -Recurse -Force dist }; npm run build:win 2>&1 | Select-Object -Last 12)",
+      "PowerShell($env:Path = \"$env:USERPROFILE\\\\.cargo\\\\bin;$env:Path\"; Set-Location \"c:\\\\Users\\\\china\\\\Videos\\\\amazon-bot\\\\electron\\\\crawler\"; cargo build --release 2>&1 | Select-Object -Last 30)"
     ]
   }
 }

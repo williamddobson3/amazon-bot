@@ -26,7 +26,7 @@
     html, body {
       margin: 0;
       width: 820px;
-      height: 600px;
+      height: 648px;
       background: var(--bg);
       color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
@@ -116,6 +116,8 @@
     const COLOR_EFFECTIVE = '#FF1493';   // 実質価格 (magenta circle)
     const COLOR_OTHER     = '#D1D5DB';   // 他の出品価格 (light-grey square)
     const COLOR_SELLERS   = '#1E90FF';   // 出品者数 (blue triangle)
+    const COLOR_AMAZON    = '#FF9900';   // Ama本体価格 (orange dot, 項目14)
+    const COLOR_IMP_SELLERS = '#34d399'; // 新品出品数(取込) (green diamond, 項目9)
 
     let priceChart = null;
     let countChart = null;
@@ -150,9 +152,10 @@
       return 'flat';
     }
 
-    function renderStatsTable(stats, latestEff) {
+    function renderStatsTable(stats, latestEff, fees) {
       const grid = document.getElementById('stats-grid');
       const cells = [];
+      fees = fees || {};
       // 実質最新価格列の差額/下落率は「1個前の監視価格 − 最新価格」=
       // 瞬間下落価格 / 瞬間下落率 (クライアント要望、2026-05)。stats.
       // prevEffective が無い (観測 1 件目の新規商品) 場合は diff = null
@@ -202,26 +205,70 @@
         cells.push(`<div class="stats-cell ${signClass(c.diff)}">${fmtPctRef(c.diff, c.ref)}</div>`);
       }
 
+      // 利益額 / 利益率 row (spec 項目11) — 通知スクショもアプリ詳細グラフと
+      // 同じ表にする。各列の基準実質 (c.ref: 実質最新列=瞬間=1個前実質、他列=
+      // N日平均実質) と最新実質 latestEff・各手数料から算出:
+      //   利益額 = 基準実質 − 最新実質 − Amazon − FBA − 在庫保管料
+      //   利益率 = 利益額 ÷ 最新実質 × 100
+      // 着色は利益の符号 (プラス→赤=pos / マイナス→青=neg) — アプリと統一。
+      const af = (fees.amazon  != null) ? fees.amazon  : null;
+      const ff = (fees.fba     != null) ? fees.fba     : null;
+      const sf = (fees.storage != null) ? fees.storage : null;
+      const PROFIT_SANITY = 0.2;
+      const amtFromRef = (ref) => {
+        if (ref == null || latestEff == null) return null;
+        if (latestEff <= 0 || latestEff < ref * PROFIT_SANITY) return null;
+        if (af == null || ff == null || sf == null) return null;
+        return ref - latestEff - af - ff - sf;
+      };
+      const roeFromRef = (ref) => {
+        const amt = amtFromRef(ref);
+        if (amt == null || latestEff == null || latestEff === 0) return null;
+        return (amt / latestEff) * 100;
+      };
+      const fmtAmt = (v) => (v == null || !isFinite(v))
+        ? '—'
+        : '¥' + (v < 0 ? '-' : '') + Math.abs(Math.round(v)).toLocaleString('ja-JP');
+      const fmtRoe = (v) => (v == null || !isFinite(v))
+        ? '—'
+        : (v > 0 ? '+' : '') + Math.round(v) + '%';
+
+      cells.push('<div class="stats-cell label">利益額</div>');
+      for (const c of cols) {
+        const v = amtFromRef(c.ref);
+        cells.push(`<div class="stats-cell ${signClass(v)}">${fmtAmt(v)}</div>`);
+      }
+      cells.push('<div class="stats-cell label">利益率</div>');
+      for (const c of cols) {
+        const v = roeFromRef(c.ref);
+        cells.push(`<div class="stats-cell ${signClass(v)}">${fmtRoe(v)}</div>`);
+      }
+
       grid.innerHTML = cells.join('');
     }
 
     // ── Chart renderer (unchanged from prior version) ──────────
     window.chartRender.onRender((msg) => {
       // 1. Render stats table at top
-      renderStatsTable(msg.stats || {}, msg.latestEff);
+      renderStatsTable(msg.stats || {}, msg.latestEff, msg.fees || {});
 
       // 2. Render the two TimeSeriesCharts below
       const priceCanvas = document.getElementById('c-price');
       const countCanvas = document.getElementById('c-count');
 
       if (!priceChart) {
+        // 通知用スクショは「最小値ゼロ」モード ON で生成する (2026-06
+        // client spec)。app 側の詳細グラフのデフォルトと挙動を一致
+        // させて、Discord に貼られる画像と app 表示の見た目が揃う。
         priceChart = new TimeSeriesChart(priceCanvas, {
           yFormatter: (v) => '¥' + Math.round(v).toLocaleString(),
           autoRange: true,
+          minZero:   true,
         });
         countChart = new TimeSeriesChart(countCanvas, {
           yFormatter: (v) => String(Math.round(v)),
           autoRange: true,
+          minZero:   true,
           // 出品者数 is an integer count; never let the tick fall
           // below 1 person, which would produce 10.5/11.5 labels.
           minTick: 1,
@@ -235,6 +282,10 @@
         { color: COLOR_OTHER, lineWidth: 1.6,
           points: msg.data.otherSellers || [],
           stepLine: true, pointShape: 'square', markerSize: 3.5 },
+        // Ama本体価格 (項目14) — オレンジのドットのみ (疎なデータ、連結線なし)。
+        { color: COLOR_AMAZON,
+          points: msg.data.amazon || [],
+          dotsOnly: true, pointShape: 'circle', markerSize: 4 },
         { color: COLOR_EFFECTIVE, lineWidth: 1.4,
           points: msg.data[msg.avgKey] || [],
           dashed: true, showDots: false },
@@ -244,17 +295,40 @@
         points: msg.data.sellerCount || [],
         stepLine: true, pointShape: 'triangle', markerSize: 4.5,
       }];
+      // 新品出品数(取込) (項目9) — 最新1点のみ右端にプロット。
+      if (msg.data.impSellers != null) {
+        countSeries.push({
+          color: COLOR_IMP_SELLERS,
+          points: [{ t: msg.to, v: msg.data.impSellers }],
+          dotsOnly: true, pointShape: 'diamond', markerSize: 5,
+        });
+      }
 
       priceChart.setSeries(priceSeries, msg.from, msg.to);
       countChart.setSeries(countSeries, msg.from, msg.to);
 
-      // Two rAFs to ensure ResizeObserver has fired and the rendered
-      // pixels are fully committed before the main process captures.
-      requestAnimationFrame(() => {
+      // Capture-readiness gate — strengthened to eliminate the
+      // intermittent "black image" bug. The signal sequence is:
+      //   1. await document.fonts.ready
+      //        ↳ on the very first render the system / Japanese fonts
+      //          may not be loaded yet; capturing earlier produces
+      //          missing glyphs (or a blank canvas if the chart text
+      //          layout reflows mid-paint).
+      //   2. two rAFs
+      //        ↳ ensures ResizeObserver has fired and the rendered
+      //          pixels for both canvases are committed to the
+      //          compositor (each rAF = one frame).
+      //   3. a final 32 ms timeout
+      //        ↳ belt-and-suspenders for slow GPU / busy main process
+      //          cases where compositor commit lags a frame behind.
+      (async () => {
+        try { await document.fonts.ready; } catch { /* ignore */ }
         requestAnimationFrame(() => {
-          window.chartRender.signalReady();
+          requestAnimationFrame(() => {
+            setTimeout(() => window.chartRender.signalReady(), 32);
+          });
         });
-      });
+      })();
     });
   </script>
 </body>

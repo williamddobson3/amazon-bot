@@ -2,21 +2,32 @@ appId: com.amazon-monitor.app
 productName: Amazon Price Monitor
 copyright: Copyright (c) 2026
 
+# このビルド機は物理メモリが少なく、既定の最大圧縮 (7za -mx=9) でインストーラ
+# 作成中に OOM する。圧縮を store (無圧縮) にして必要メモリを最小化する。
+# インストーラは大きくなるが、低メモリ環境でも確実にビルドできる。メモリに
+# 余裕のある環境では normal / maximum に戻すとインストーラが小さくなる。
+compression: store
+
 directories:
   output: dist
 
+# `crawler/index.node` is the Rust → Node-API addon (method A —
+# in-process). It must be inside `files` so electron-builder packages
+# it, AND inside `asarUnpack` so Node can `require()` the file at
+# runtime (native addons cannot be loaded from inside an asar archive).
 files:
   - src/**/*
   - assets/**/*
   - package.json
+  - crawler/index.node
 
-# better-sqlite3 ships a native `.node` binary that Node cannot load
-# from inside an asar archive — the file has to sit on the real
-# filesystem at runtime. asarUnpack extracts the whole package out
-# of the archive during packaging so `require('better-sqlite3')`
-# works at runtime without any user-facing error.
 asarUnpack:
+  # better-sqlite3 ships a native `.node` binary — same loading
+  # restriction as our crawler addon below.
   - "node_modules/better-sqlite3/**/*"
+  # Rust crawler addon (compiled by `npm run build:crawler`). Lands at
+  # <resources>/app.asar.unpacked/crawler/index.node in packaged builds.
+  - "crawler/index.node"
 
 win:
   target:

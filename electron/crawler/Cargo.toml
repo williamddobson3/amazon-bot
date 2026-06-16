@@ -1,0 +1,49 @@
+[package]
+name        = "amazon-crawler"
+version     = "1.0.0"
+edition     = "2021"
+description = "Amazon search-result crawler — Node-API addon for Electron (method A: in-process)"
+publish     = false
+# Method A: only the cdylib is built. The legacy `src/main.rs` (sidecar
+# entry point) is preserved on disk for reference but excluded from the
+# build via `autobins = false`.
+autobins    = false
+
+# cdylib = a dynamic library exposing the C ABI, which is what
+# Node-API loads at runtime. Cargo produces:
+#   * Windows: target/release/amazon_crawler.dll
+#   * macOS  : target/release/libamazon_crawler.dylib
+#   * Linux  : target/release/libamazon_crawler.so
+# scripts/copy-crawler.js renames the platform-specific output to
+# `crawler/index.node` which `require()` can load directly.
+[lib]
+name       = "amazon_crawler"
+crate-type = ["cdylib"]
+path       = "src/lib.rs"
+
+[dependencies]
+napi        = { version = "2", default-features = false, features = ["async", "napi6", "tokio_rt"] }
+napi-derive = "2"
+tokio       = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+anyhow      = "1"
+reqwest     = { version = "0.12", features = ["gzip", "brotli", "deflate"] }
+scraper     = "0.21"
+ego-tree    = "0.9"
+regex       = "1"
+rand        = "0.8"
+
+[build-dependencies]
+napi-build  = "2"
+
+# Release profile — strip + LTO keep the binary small and resistant
+# to reverse-engineering, which is the original protection requirement.
+# `panic = "abort"` is intentionally NOT set here: napi-rs catches Rust
+# panics and surfaces them as JavaScript exceptions, so unwinding must
+# remain available.
+[profile.release]
+strip         = true
+opt-level     = 3
+lto           = true
+codegen-units = 1

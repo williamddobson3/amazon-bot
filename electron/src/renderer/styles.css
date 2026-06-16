@@ -411,7 +411,68 @@ html, body {
 }
 
 .header-brand {
+  display: flex; align-items: center; gap: 14px;
+}
+
+/* 並び替え + フィルタ条件合致探索の手動再評価ボタン (2026-05 / 2026-06)。
+   ボタンの状態は「再計算が進行中か否か」だけで決まる (client spec):
+     ・再計算なし → 青 (enabled)。いつでも 更新/並び替え/フィルタ を開始できる。
+     ・再計算中   → グレー (disabled)。押せない (更新/起動/監視停止/周期完了 のどれでも)。 */
+.refresh-fs-btn {
   display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  background: #2f6fed;                 /* 青 = enabled (クリック可) */
+  border: 1px solid #2f6fed;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+  user-select: none;
+}
+.refresh-fs-btn:hover:not(:disabled) {
+  background: #1f5fde;
+  border-color: #1f5fde;
+}
+.refresh-fs-btn:active:not(:disabled) {
+  background: #1a52c4;
+}
+/* 再計算中 → グレー (disabled・クリック不可)。再計算が終われば青に戻る。 */
+.refresh-fs-btn:disabled {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+  color: #9aa3b2;
+  cursor: default;
+}
+.refresh-fs-btn:disabled .refresh-fs-icon {
+  background: #b8c0cc;
+  color: #ffffff;
+}
+.refresh-fs-icon {
+  display: inline-flex;
+  width: 22px; height: 22px;
+  align-items: center; justify-content: center;
+  background: #ffffff;                 /* 青ボタン上で目立つ白丸 + 青の⟳ */
+  color: #2f6fed;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+}
+.refresh-fs-btn.refreshing .refresh-fs-icon {
+  animation: refresh-fs-spin 0.8s linear infinite;
+}
+.refresh-fs-label {
+  white-space: nowrap;
+}
+@keyframes refresh-fs-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes refresh-fs-pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(91,158,255,0.35); }
+  50%     { box-shadow: 0 0 0 5px rgba(91,158,255,0); }
 }
 .header-logo {
   width: 26px; height: 26px;
@@ -424,6 +485,14 @@ html, body {
   font-size: 14px; font-weight: 700;
   color: var(--text);
   letter-spacing: -.2px;
+}
+/* アプリのバージョン表示 (client要望) — タイトル右にさりげなく。 */
+.header-version {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text3);
+  letter-spacing: .2px;
+  margin-left: -8px;   /* .header-brand の gap:14px を詰めてタイトルに寄せる */
 }
 
 #status-bar {
@@ -455,6 +524,24 @@ html, body {
   padding: 1px 8px;
   font-size: 10px; font-weight: 700;
 }
+
+/* 直近 1 周期に要したクロール時間バッジ (2026-05)。スクレイピング
+   バッジと並べて、ぱっと見で「今のクロールは早いか遅いか」が分かる。
+   asin-badge と色味を変えて区別 (青系で「時間情報」を示唆)。 */
+.cycle-time-badge {
+  background: rgba(91,158,255,0.12);
+  border: 1px solid rgba(91,158,255,.35);
+  color: #cfe1ff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .2px;
+  cursor: default;
+  user-select: none;
+}
+.cycle-time-badge.hidden { display: none; }
 
 #btn-logout {
   background: none;
@@ -784,6 +871,84 @@ select option { background: var(--bg2); }
   flex-shrink: 0;
 }
 
+/* ── ソフトボット (ロボット認証) ブロッキングモーダル ──────────
+   Amazon のボット検知でクロールが止まったとき全画面で表示し、待つ/再ログイン/
+   手動認証 の3手段を案内する。login-gate と同じオーバーレイ作法。 */
+.captcha-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;                 /* login-gate(1000) より前面 */
+  background: rgba(4, 4, 14, 0.92);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.captcha-modal.hidden { display: none; }
+.captcha-modal-card {
+  max-width: 480px;
+  width: 100%;
+  padding: 28px 28px 24px;
+  background: linear-gradient(180deg, rgba(28, 28, 48, .98), rgba(18, 18, 30, .98));
+  border: 1px solid rgba(255, 153, 0, .40);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5), 0 0 40px rgba(255, 153, 0, .10);
+  text-align: center;
+}
+.captcha-modal-icon { font-size: 38px; line-height: 1; margin-bottom: 8px; }
+.captcha-modal-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.5;
+}
+.captcha-modal-reason {
+  font-size: 11.5px;
+  color: var(--text2);
+  margin: 0 0 10px;
+  min-height: 1em;
+}
+.captcha-modal-desc {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.7;
+  text-align: left;
+}
+.captcha-modal-countdown {
+  font-size: 13px;
+  color: var(--text);
+  margin: 0 0 16px;
+  padding: 9px;
+  border-radius: 8px;
+  background: rgba(255, 153, 0, .10);
+}
+.captcha-modal-countdown span {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.captcha-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.captcha-modal-help {
+  text-align: left;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.captcha-modal-help li {
+  font-size: 11.5px;
+  line-height: 1.85;
+  color: var(--text3);
+}
+
 /* ── Tabular viewer ────────────────────────────────────────
    Replaces the card-based product list. 21 columns of monitoring data
    per row; the table scrolls horizontally inside its container so it
@@ -850,6 +1015,87 @@ select option { background: var(--bg2); }
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* 並び替えコントロール (2026-05) — 検索バーの右に配置。
+   セレクタ + 昇降ボタンを横並び。並び替えなし時はボタンを disabled
+   表示にして「今は無効」が一目で分かるようにしている。 */
+#sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+#sort-selector {
+  padding: 5px 8px;
+  background: #fff;
+  border: 1px solid #777;
+  border-radius: 4px;
+  color: #111;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 180px;
+}
+#sort-selector option {
+  background: #ffffff;
+  color: #111111;
+}
+#sort-selector optgroup {
+  background: #f1f5f9;
+  color: #334155;
+  font-style: normal;
+  font-weight: 700;
+}
+#sort-selector option:checked,
+#sort-selector option:hover {
+  background: #2563eb;
+  color: #ffffff;
+}
+/* 方向は2ボタン (▲=高い順/降順, ▼=低い順/昇順)。横並びでグループ化し、選択中
+   (アクティブ) の方向だけオレンジでハイライトする。並び替えなし時は両方 disabled。 */
+#sort-dir-group {
+  display: inline-flex;
+}
+.sort-arrow {
+  padding: 5px 9px;
+  background: rgba(255,153,0,.10);
+  border: 1px solid rgba(255,153,0,.5);
+  color: var(--text2);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+#sort-dir-desc { border-radius: 4px 0 0 4px; }
+#sort-dir-asc  { border-radius: 0 4px 4px 0; border-left: none; }
+.sort-arrow:hover:not(:disabled):not(.active) {
+  background: rgba(255,153,0,.22);
+  color: var(--text);
+}
+.sort-arrow.active {
+  background: rgba(255,153,0,.85);
+  border-color: rgba(255,153,0,.95);
+  color: #1a1a1a;
+}
+.sort-arrow:disabled {
+  background: rgba(120,120,120,.12);
+  border-color: rgba(120,120,120,.35);
+  color: var(--text3);
+  cursor: not-allowed;
+}
+/* 並び替えで stats を一括取得している間のスピン表示。drop_* キーを
+   選んだ直後、ensureStatsLoaded() が走っている数百ms〜数秒の間だけ
+   `.sort-loading` クラスがセレクタに付く。 */
+#sort-selector.sort-loading {
+  background: linear-gradient(110deg, #fff 30%, #fef3c7 50%, #fff 70%);
+  background-size: 200% 100%;
+  animation: sort-loading-shimmer 1.2s linear infinite;
+}
+@keyframes sort-loading-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 #group-filter-count {
   font-size: 12.5px;
@@ -1021,6 +1267,7 @@ select option { background: var(--bg2); }
 .bulk-action-delete   { background: #dc2626; border-color: #b91c1c; }   /* 赤 */
 .bulk-action-restore  { background: #0ea5e9; border-color: #0369a1; }   /* (trash) */
 .bulk-action-harddel  { background: #b91c1c; border-color: #7f1d1d; }   /* (trash) */
+.bulk-action-amazon   { background: #ff9900; border-color: #cc7a00; color: #1a1a1a; }   /* Amazon オレンジ */
 
 /* While the scheduler is running, the bulk-toolbar collapses to a
    single 監視ストップ button per spec. Stretch it across the full
@@ -1083,6 +1330,280 @@ select option { background: var(--bg2); }
   flex-direction: column;
   gap: 10px;
 }
+/* ── 通知価格の一括設定 / リセット modal (2026-05) ────────── */
+.notify-set-summary, .notify-reset-summary {
+  font-size: 11.5px;
+  color: var(--text2);
+  font-weight: 600;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.notify-set-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 6px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.notify-set-option:hover {
+  background: rgba(255,153,0,.06);
+  border-color: rgba(255,153,0,.25);
+}
+.notify-set-option input[type="radio"] {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  accent-color: #ffa500;
+}
+.notify-set-option span {
+  flex: 1;
+  color: var(--text);
+}
+.notify-set-val {
+  width: 64px;
+  padding: 3px 6px;
+  margin: 0 4px;
+  background: #fff;
+  border: 1px solid #777;
+  border-radius: 4px;
+  color: #111;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.notify-reset-text {
+  font-size: 11.5px;
+  color: var(--text2);
+  line-height: 1.6;
+  margin: 0;
+  padding: 8px;
+  background: rgba(248,113,113,.08);
+  border: 1px solid rgba(248,113,113,.25);
+  border-radius: 6px;
+}
+.notify-set-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+}
+.notify-set-actions .btn {
+  min-width: 120px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 通知価格用 bulk action ボタン色付け — 設定 = シアン、リセット = 警告 */
+.bulk-action-notify-set {
+  background: rgba(34,211,238,.16) !important;
+  border: 1px solid rgba(34,211,238,.45) !important;
+  color: #67e8f9 !important;
+}
+.bulk-action-notify-set:hover:not(:disabled) {
+  background: rgba(34,211,238,.28) !important;
+}
+.bulk-action-notify-reset {
+  background: rgba(248,113,113,.14) !important;
+  border: 1px solid rgba(248,113,113,.4) !important;
+  color: #fca5a5 !important;
+}
+.bulk-action-notify-reset:hover:not(:disabled) {
+  background: rgba(248,113,113,.24) !important;
+}
+
+/* ── クロール診断モーダル (2026-05) ─────────────────────────── */
+.crawl-diag-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: .3px;
+  margin-top: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255,153,0,.25);
+}
+.crawl-diag-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+}
+.crawl-diag-toolbar label {
+  font-size: 11.5px;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.crawl-diag-toolbar select {
+  background: #fff;
+  border: 1px solid #777;
+  border-radius: 4px;
+  color: #111;
+  font-size: 11.5px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.crawl-diag-toolbar select option {
+  background: #ffffff;
+  color: #111111;
+}
+.crawl-diag-legend {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-size: 10.5px;
+  color: var(--text2);
+}
+.cd-legend-line   { color: #ffa500; }
+.cd-legend-marker { color: #f87171; }
+.crawl-diag-summary {
+  font-size: 11.5px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.crawl-diag-summary strong {
+  color: var(--text);
+  font-weight: 700;
+}
+.crawl-diag-chart-wrap {
+  position: relative;
+  background: #0a0a18;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 6px;
+  padding: 6px;
+}
+.crawl-diag-chart-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 320px;
+}
+.crawl-diag-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  font-size: 12.5px;
+  background: rgba(10,10,24,.85);
+  border-radius: 6px;
+}
+.crawl-diag-empty.hidden { display: none; }
+.crawl-diag-blocks {
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 10.5px;
+  color: var(--text2);
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 8px;
+}
+.crawl-diag-blocks .cd-block-row {
+  display: grid;
+  grid-template-columns: 140px 110px 1fr 60px;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dotted rgba(255,255,255,.06);
+}
+.crawl-diag-blocks .cd-block-row:last-child { border-bottom: none; }
+.crawl-diag-blocks .cd-block-type {
+  color: #f87171;
+  font-weight: 600;
+}
+.crawl-diag-blocks .cd-block-empty {
+  text-align: center;
+  color: var(--text3);
+  padding: 12px 0;
+}
+
+/* ── 左下ログドック (2026-06 client要望) ──────────────────────────────
+   常時表示の小型ログ盤。最小化=アイコンのみ / 最大化=小型ダッシュボード。
+   サイズはアプリ(ビューポート)を超えないよう max-width/max-height で上限。 */
+.log-dock {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  /* 通常の画面コンテンツより前面、ただしログインゲート(1000)・各モーダル
+     (1050〜1200)・再計算スピナー(1200) より後面にする。これにより全画面
+     オーバーレイ表示中はドックが隠れ、通常操作中だけ左下に浮く。 */
+  z-index: 990;
+}
+/* 最小化: アイコンのみ表示しパネルは隠す。 */
+.log-dock-icon {
+  display: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,153,0,.45);
+  background: rgba(20,20,34,.96);
+  color: #ff9900;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+.log-dock-icon:hover { background: rgba(255,153,0,.18); }
+.log-dock.collapsed .log-dock-icon { display: inline-flex; align-items: center; justify-content: center; }
+.log-dock.collapsed .log-dock-panel { display: none; }
+
+.log-dock-panel {
+  display: flex;
+  flex-direction: column;
+  /* アプリ(ビューポート)を絶対に超えないようにする。 */
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(46vh, calc(100vh - 96px));
+  background: rgba(15,15,30,.98);
+  border: 1px solid rgba(255,153,0,.40);
+  border-radius: 10px;
+  box-shadow: 0 8px 26px rgba(0,0,0,.5);
+  overflow: hidden;
+}
+.log-dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 6px 12px;
+  background: rgba(255,153,0,.10);
+  border-bottom: 1px solid rgba(255,153,0,.25);
+  flex-shrink: 0;
+}
+.log-dock-title { font-size: 12px; font-weight: 700; color: #ffb44d; }
+.log-dock-header-actions { display: flex; gap: 4px; }
+.log-dock-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text2);
+  font-size: 13px;
+  line-height: 1;
+  width: 26px;
+  height: 24px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.log-dock-btn:hover { background: rgba(255,255,255,.10); color: var(--text); }
+.log-dock-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: rgba(0,0,0,.25);
+  font-family: 'Consolas','Menlo','Courier New',monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+/* ログ行 (ドックで使用)。 */
+.app-log-row { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+.app-log-time { color: var(--text3); flex-shrink: 0; }
+.app-log-msg  { color: var(--text); }
+.app-log-warn  .app-log-msg { color: #ffcc66; }
+.app-log-error .app-log-msg { color: #fc8181; }
+
 .generic-modal-body textarea {
   width: 100%;
   padding: 8px 10px;
@@ -1172,6 +1693,12 @@ select option { background: var(--bg2); }
   font-size: 11px;
   color: var(--text2);
   line-height: 1.45;
+}
+/* ヘッダー右上の「条件を保存」(フッターの #fnm-save と同機能・client request)。
+   hint が flex:1 で伸びるので、このボタンと ✕ は右端に寄る。縮めない。 */
+.fnm-header-save {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .fnm-modal-close {
   font-size: 18px;
@@ -1264,10 +1791,29 @@ select option { background: var(--bg2); }
 
 /* 出品者数 range grid — 5 rows × { ☐ label [min] ~ [max] 人 } */
 .fnm-mpcount-grid,
-.fnm-droprate-grid {
+.fnm-droprate-grid,
+.fnm-ranges-grid {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* 範囲フィルタ (2026-06) — 種別ごとに区切り線を入れて視覚的にグループ化。
+   日時系 / 価格系 / 平均実質BuyBox系 / その他 の境目に薄い線。 */
+.fnm-ranges-grid .fnm-range-row.fnm-range-group-start {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255,255,255,.1);
+}
+.fnm-ranges-grid .fnm-range-row input[type="datetime-local"] {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11.5px;
+  padding: 3px 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: inherit;
 }
 /* 下落率 — same range row layout but each row has a sub-line below
    showing the calculation formula per spec image. */
@@ -1303,6 +1849,18 @@ select option { background: var(--bg2); }
 .fnm-range-suffix {
   color: var(--text2);
 }
+/* ⑤「空白含む」チェックボックス (Ama本体出品割合のみ)。range-row グリッドの
+   7 番目の子なので、明示的に全幅・右寄せのサブ行として配置する。 */
+.fnm-range-blank {
+  grid-column: 1 / -1;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: var(--text2);
+}
+.fnm-range-blank input { margin: 0; }
 
 /* Keyword grid — 4 rows × { ☐ label [text input] } */
 .fnm-keyword-grid {
@@ -1607,6 +2165,12 @@ select option { background: var(--bg2); }
   color: var(--accent);
   letter-spacing: .3px;
 }
+.fnm-section-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text3);
+  margin-left: 6px;
+}
 .fnm-discord-section input {
   padding: 7px 10px;
   background: var(--input-bg);
@@ -1656,34 +2220,53 @@ select option { background: var(--bg2); }
 
 /* THE source of truth for column widths. Both header and data rows
    reuse this template, so cells align across rows regardless of
-   content length. 20 tracks total — adjust here, not per-cell.
+   content length. 22 tracks total — adjust here, not per-cell.
    The Keepa graph image itself is clickable to open the chart modal,
    so a separate 監視グラフ column is unnecessary.
    The trash view re-uses this same template but binds different
    headers to the columns. */
 .viewer-row {
   display: grid;
+  /* 列順は 2026-06 spec 項目7-2 のデフォルト並び。先頭3列 (固定/sticky) は
+     active=チェック/グループ/最新取得日時、trash=チェック/サイト比較/ゴミ捨て日時。
+     renderer.js の commonRowCellsHtml / commonHeaderHtml と完全一致させること。 */
   grid-template-columns:
-    64px        /* checkbox + すべて header button */
-    230px       /* group: サイト比較 + name + 変更/登録 in a row */
-    100px       /* last fetched */
-    100px       /* registered */
-    76px        /* image — widened so 「商品写真」 header fits one line */
-    240px       /* title */
-    100px       /* ASIN */
-    100px       /* condition */
-    160px       /* delivery */
-    76px        /* MP count — widened so 「出品者数」 header fits one line */
-    100px       /* Keepa (also opens chart modal on click) */
-    90px        /* BuyBox */
-    62px        /* points */
-    96px        /* effective */
-    120px       /* avg 1d */
-    120px       /* avg 7d */
-    120px       /* avg 30d */
-    120px       /* avg 90d */
-    120px       /* avg 180d */
-    120px;      /* other sellers */
+    64px        /* 1  checkbox + すべて header button (固定) */
+    230px       /* 2  グループ / サイト比較 (固定) */
+    100px       /* 3  最新取得日時 / ゴミ捨て日時 (固定) */
+    110px       /* 4  最新通知日時 (項目29) */
+    88px        /* 5  通知ヒット総回数 (項目29) */
+    96px        /* 6  通知なし経過日数 (項目29) */
+    100px       /* 7  登録日時 / 最新取得日時 */
+    76px        /* 8  商品写真 */
+    240px       /* 9  商品名 */
+    100px       /* 10 ASIN */
+    96px        /* 11 ランキング(取込) */
+    100px       /* 12 月間販売数(Amazon表記) */
+    104px       /* 13 30日ランク変動(取込) */
+    112px       /* 14 全出品数(内訳) — 件数 + 状態サブ行 */
+    88px        /* 15 新品出品数(取込) */
+    112px       /* 16 FBA利益額(30日平均) */
+    104px       /* 17 ROE利益率(30日平均) */
+    100px       /* 18 監視グラフ (クリックで詳細モーダル) */
+    96px        /* 19 最新実質BuyBox価格 */
+    90px        /* 20 通知価格(個別設定) */
+    120px       /* 21 1日平均 実質BuyBox */
+    120px       /* 22 7日平均 実質BuyBox */
+    120px       /* 23 30日平均 実質BuyBox */
+    120px       /* 24 90日平均 実質BuyBox */
+    120px       /* 25 180日平均 実質BuyBox */
+    96px        /* 26 Ama本体価格 (項目14) */
+    110px       /* 27 Ama本体出品割合(直近30日) (項目15) */
+    120px       /* 28 他の出品価格 */
+    90px        /* 29 BuyBox価格 */
+    62px        /* 30 ポイント */
+    70px        /* 31 送料 — 1円以上のみ表記、無料は空欄 */
+    160px       /* 32 発送情報 */
+    150px       /* 33 サイズ区分 */
+    104px       /* 34 Amazon販売手数料 */
+    96px        /* 35 FBA販売手数料 */
+    96px;       /* 36 在庫保管料 */
   align-items: center;
   height: 72px;        /* must match ROW_HEIGHT in renderer.js */
 }
@@ -1738,18 +2321,39 @@ select option { background: var(--bg2); }
 /* 監視グラフ列のクリック可能なヘッダー — 期間切替ドロップダウンを開く。
    通常の列ヘッダーと違い、ホバーでアクセント色が出るのでクリック
    できると分かるようにしている。 */
-.viewer-row.viewer-header .sparkline-header {
+.viewer-row.viewer-header .sparkline-header,
+.viewer-row.viewer-header .profit-period-header {
   cursor: pointer;
   user-select: none;
   border-radius: 4px;
   transition: background 120ms, color 120ms;
 }
-.viewer-row.viewer-header .sparkline-header:hover {
+.viewer-row.viewer-header .sparkline-header:hover,
+.viewer-row.viewer-header .profit-period-header:hover {
   background: rgba(255,153,0,.10);
   color: var(--accent, #ff9900);
 }
-.viewer-row.viewer-header .sparkline-header:hover .col-sub {
+.viewer-row.viewer-header .sparkline-header:hover .col-sub,
+.viewer-row.viewer-header .profit-period-header:hover .col-sub {
   color: var(--accent, #ff9900);
+}
+
+/* 列ドラッグ並び替え (項目5) — 可動ヘッダーセル (data-col) だけが掴める。
+   固定列 (nth-child 1–3) は data-col を持たないので対象外。 */
+.viewer-row.viewer-header > div[data-col] {
+  cursor: grab;
+  user-select: none;
+}
+.viewer-row.viewer-header > div[data-col].col-dragging {
+  opacity: .4;
+  cursor: grabbing;
+}
+/* ドロップ位置インジケータ — 掴んだ列が挿入される側に縦線を出す。 */
+.viewer-row.viewer-header > div[data-col].col-drop-before {
+  box-shadow: inset 3px 0 0 0 var(--accent, #ff9900);
+}
+.viewer-row.viewer-header > div[data-col].col-drop-after {
+  box-shadow: inset -3px 0 0 0 var(--accent, #ff9900);
 }
 
 /* Floating period picker — anchored under the column header by JS,
@@ -1788,6 +2392,12 @@ select option { background: var(--bg2); }
   background: rgba(255,153,0,.22);
   color: #ffd28a;
   border-color: rgba(255,153,0,.45);
+}
+/* 通常ブロックと「縦軸ゼロ固定」ブロックの区切り (項目24)。 */
+.sparkline-dropdown-sep {
+  height: 1px;
+  margin: 5px 4px;
+  background: rgba(255,153,0,.28);
 }
 
 /* Data rows — virtualized via absolute positioning. The bottom
@@ -1907,6 +2517,24 @@ select option { background: var(--bg2); }
 .cell-asin a    { color: var(--accent); text-decoration: none; }
 .cell-asin a:hover { text-decoration: underline; }
 
+/* クリックで ASIN をクリップボードへコピーする箇所。ビューア表の ASIN
+   セルと詳細グラフモーダル両方で使われる共通スタイル。
+   .asin-copy-flash は copyAsinToClipboard が 1.2 秒だけ付与する。 */
+.asin-copy {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 4px;
+  transition: background 120ms, color 120ms;
+  user-select: none;
+}
+.asin-copy:hover {
+  background: rgba(255,153,0,.12);
+}
+.asin-copy-flash {
+  background: rgba(91,158,255,.22) !important;
+  color: #8ec0ff !important;
+}
+
 /* Product thumbnail (Amazon CDN). Shimmer-while-loading → solid-on-load
    → hidden-on-error pattern, driven by load/error listeners in
    renderer.js (createRow). */
@@ -1916,6 +2544,8 @@ select option { background: var(--bg2); }
   width: 40px; height: 40px;
   object-fit: contain;
   border-radius: 4px;
+  /* 商品画像はクリックで Amazon 商品ページを開く (data-product-link)。 */
+  cursor: pointer;
   background-color: rgba(255,255,255,.04);
   background-image: linear-gradient(
     100deg,
@@ -1968,9 +2598,10 @@ select option { background: var(--bg2); }
    Hover reveals the full string via the title attribute set in
    activeRowHtml/trashRowHtml. cursor: help signals to the user
    that more is hidden. */
-/* Single-line title with ellipsis. Long product names truncate at
-   the column boundary; hover reveals the full string via the title
-   attribute set in activeRowHtml/trashRowHtml. */
+/* Title cell base (used by the list AND the chart-modal title). The list
+   override below expands it to 3 lines; other contexts stay single-line.
+   Hover reveals the full string via the title attribute set in
+   activeRowHtml/trashRowHtml. */
 .cell-title {
   font-size: 11px;
   color: var(--text);
@@ -1978,6 +2609,48 @@ select option { background: var(--bg2); }
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: help;
+}
+
+/* 商品名を3行表示にする (項目6: 長文商品名を見やすく)。アプリリスト
+   (.viewer-row) 内の商品名セルだけが対象 — モーダル等の .cell-title は
+   従来どおり1行。.viewer-row .cell-title の specificity (0,2,0) が
+   .viewer-row > div の nowrap (0,1,1) を上回るので !important は不要。
+   3行 ≈ 11px × 1.3 × 3 + 上下padding ≈ 59px で 72px の行に収まる。 */
+/* 3行打ち切りは「固定高さ + overflow:hidden」で確定的に行う (client報告で
+   -webkit-line-clamp が効かない環境があったため、それに依存しない)。
+   ポイント:
+   - line-height と height を同じ em 単位で表現 → 実フォントサイズが何であれ
+     「内容領域 = ちょうど3行」になり、4行目以降を確実に隠す。
+   - line-height は !important で固定 (どこかで上書きされ実効 line-height が
+     想定とズレていたのが、3行目が欠ける/4行目が見える原因だった)。
+   - 親が box-sizing:border-box なので、固定 height に上下 padding(8+8=16px) を
+     足す。
+   - -webkit-line-clamp は「効く環境では末尾を…省略」のボーナスとして併用。 */
+.viewer-row .cell-title {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 3;
+  white-space: normal !important;
+  word-break: break-word;
+  line-height: 1.4 !important;
+  height: calc(1.4em * 3 + 16px) !important;   /* 3行 + 上下padding(16px) */
+  overflow: hidden !important;
+  align-self: center;
+}
+
+/* 商品名は span でラップされており、クリックで Amazon 商品ページを
+   開く。詳細グラフモーダルの商品名にも同じクラスを付与している。
+   テキスト選択は引き続き可能 (user-select は触らない) — ドラッグでの
+   テキスト選択時は click イベントが発火しないので両立する。 */
+.title-link {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 1px 3px;
+  transition: background 120ms, color 120ms;
+}
+.title-link:hover {
+  background: rgba(255,153,0,.10);
+  color: var(--accent, #ff9900);
 }
 .cell-delivery {
   white-space: normal !important;
@@ -2039,9 +2712,106 @@ select option { background: var(--bg2); }
 .cell-effective .eff-pct.neg,
 .cell-effective .eff-pct.flat { background: transparent; padding: 0; }
 .cell-points      { color: var(--text2); }
+/* 通知価格 (個別設定) — 数値入力フィールドを丸ごと格納するセル。
+   空白なら通常通り FNM 通知設定が動く。値が入っている時は最新実質
+   BuyBox価格 < 入力値 で「『個別設定価格』の商品検知」専用通知が発火。 */
+.cell-notify-price {
+  padding: 0 6px !important;
+  justify-content: center;
+}
+.notify-price-input {
+  width: 100%;
+  background: #1a1a30;
+  border: 1px solid rgba(91,158,255,.35);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding: 4px 6px;
+  outline: none;
+  font-family: inherit;
+}
+.notify-price-input:focus {
+  border-color: rgba(91,158,255,.8);
+  background: #1a1a44;
+}
+.notify-price-input::-webkit-inner-spin-button,
+.notify-price-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* 送料 — 1円以上の時だけ値が入る (BuyBox 価格には既に加算済み)。
+   無料は空欄なので、右寄せ・タビュラ数字で他の価格列と縦が揃う。 */
+.cell-shipping    {
+  color: var(--text);
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
 .cell-time        { font-size: 10px; color: var(--text3); }
 .cell-condition   { font-size: 10.5px; color: var(--text2); }
 .cell-mpcount     { color: var(--text); justify-content: flex-end; }
+/* 月間販売数 (Amazon 「過去1か月で○○点以上購入」 表記)。数値は右寄せ・
+   タビュラ字幕で列が縦に揃うようにする。値が無い商品では空欄。 */
+.cell-monthly-sales {
+  color: var(--text);
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 全出品数(内訳) — 件数 (上段) + 状態 (下段サブ) の 2 行表示 (2026-06 項目7-2)。
+   状態 (新品 / 新品と中古品 …) は内訳としてセル下部に小さく表示する。 */
+.cell-allcount {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.cell-allcount .ac-count { font-weight: 600; line-height: 1.1; }
+.cell-allcount .ac-cond  {
+  color: var(--text3);
+  font-size: 9px;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* FBA利益額(30日平均) / ROE利益率(30日平均) (2026-06 項目7-2)。
+   クライアント仕様: プラス→赤字, マイナス→青字 (利益の符号で着色。
+   価格セルの「値下がり=青」とは逆の配色)。 */
+.cell-profit {
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.cell-profit .profit-val  { font-weight: 700; }
+.cell-profit .profit-pos  { color: #fc8181; }   /* プラス = 赤 */
+.cell-profit .profit-neg  { color: #5b9eff; }   /* マイナス = 青 */
+.cell-profit .profit-zero { color: var(--text3); }
+
+/* ── Keepa インポート/計算列 (2026-06 spec 項目7 + ①) ─────────────
+   出品者数(取込)/ランキング(取込)/30日ランク変動 と各手数料は数値右寄せ。
+   サイズ区分は文字列なので左寄せ + 省略表示 (hover で全文)。 */
+.cell-imp-sellers,
+.cell-imp-rank,
+.cell-imp-rankdrop,
+.cell-fee {
+  color: var(--text);
+  justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+.cell-fee { color: #ffb84d; }   /* 手数料はオレンジ系で原価関連と一目で分かるように */
+.cell-size-kubun {
+  color: var(--text2);
+  font-size: 10.5px;
+  justify-content: flex-start;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .cell-group {
   padding: 0 10px !important;
@@ -2247,6 +3017,29 @@ select option { background: var(--bg2); }
 .cell-avg .avg-pct.neg,
 .cell-avg .avg-pct.flat { background: transparent; padding: 0; }
 .cell-avg.empty .avg-val { color: var(--text3); }
+
+/* Ama本体価格 / Ama本体出品割合(直近30日) (2026-06 spec 項目14/15)。
+   価格列は他の価格セルと同じ price-color、割合は控えめな色で右寄せ。 */
+.cell-amazon {
+  justify-content: flex-end;
+  font-weight: 700;
+  color: var(--price-color);
+}
+.cell-amazon-ratio {
+  justify-content: flex-end;
+}
+.cell-amazon-ratio .amzr-val {
+  font-weight: 600;
+  color: var(--text2);
+}
+
+/* 通知ヒット総回数 (項目29) — 中央寄せの数値。最新通知日時/経過日数は
+   既存の .cell-time (日時セル) を流用。 */
+.cell-notify-count {
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
 
 /* Group management modal */
 .group-modal {
@@ -2710,6 +3503,21 @@ select option { background: var(--bg2); }
   padding-top: 6px;
   border-top: 1px dashed rgba(255,255,255,.1);
   text-transform: uppercase;
+}
+
+/* 月間販売数行 — チャートに描画しないスタッツ表示。マーカーは
+   チャート系列の dot ではなく絵文字アイコンを使い、平均期間セクション
+   との間に余白を多めに取って「別カテゴリ情報」であることを示す。 */
+.chart-legend-stat {
+  margin-top: 8px;
+  padding-bottom: 4px;
+}
+.chart-legend-icon {
+  font-size: 14px;
+  background: transparent !important;
+  border: none !important;
+  line-height: 1;
+  filter: grayscale(.2);
 }
 
 .chart-period-box {
@@ -3351,14 +4159,80 @@ select option { background: var(--bg2); }
 }
 
 /* ── Notification Items ───────────────────────────────────── */
+/* 通知履歴 — 各行は「時刻＋ヒットしたフィルタ」のヘッダ行、商品名、
+   ASIN（コピー可）、商品ページ URL（クリックで Amazon 起動）の 4 部
+   構成。色つきバッジで Active/Trash / Discord 送信状況を一目で把握。 */
 .notif-item {
-  padding: 10px 13px;
-  border-bottom: 1px solid rgba(255,255,255,.05);
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .notif-item:last-child { border-bottom: none; }
-.notif-time   { font-size: 10px; color: var(--text3); margin-bottom: 2px; }
-.notif-asin   { font-family: "Consolas", monospace; font-size: 12px; color: var(--accent); }
-.notif-detail { font-size: 12px; color: var(--text2); }
+
+.notif-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.notif-time {
+  font-size: 11px;
+  color: var(--text3);
+  font-variant-numeric: tabular-nums;
+}
+.notif-slot {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent, #ff9900);
+}
+.notif-ctx {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: .2px;
+}
+.notif-ctx-active { background: rgba(91,158,255,.18); color: #8ec0ff; }
+.notif-ctx-trash  { background: rgba(180,180,180,.18); color: #c8c8c8; }
+.notif-discord {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: auto;
+}
+.notif-discord-ok   { background: rgba(95,205,140,.16); color: #7fd9a3; }
+.notif-discord-skip { background: rgba(180,180,180,.14); color: #a0a0a0; }
+
+.notif-title {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notif-asin-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+}
+.notif-asin-label {
+  color: var(--text3);
+  font-weight: 600;
+}
+
+.notif-link-row {
+  font-size: 11px;
+}
+.notif-link {
+  font-family: "Consolas", monospace;
+  color: var(--accent, #ff9900);
+  word-break: break-all;
+}
 
 /* ── Empty State ──────────────────────────────────────────── */
 .empty-message {
@@ -3696,4 +4570,43 @@ select option { background: var(--bg2); }
   justify-content: flex-end;
   gap: 8px;
   margin-top: 6px;
+}
+
+/* ── 再計算中のブロッキングスピナー (2026-06 client要望) ─────────────────
+   値の再計算 (フィルタ評価・並び替え・各列の値・利益額) の間、画面中央に
+   スピナーを出し、その間は他の操作をできないようにする。オーバーレイが全面を
+   覆ってクリックを遮断する。チャンク分割取得 (fetchStatsInChunks) で main が
+   固まらないため、CSS アニメのこのスピナーは止まらず回り続ける。 */
+.recalc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 12, 20, 0.55);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+}
+.recalc-overlay.hidden { display: none; }
+.recalc-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  user-select: none;
+}
+.recalc-spinner {
+  width: 64px;
+  height: 64px;
+  border: 6px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #fbbf24;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+}
+.recalc-label {
+  color: #e8edf6;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }

@@ -32,6 +32,12 @@
 <header id="header">
   <div class="header-brand">
     <h1>Price Monitor</h1>
+    <span id="header-version" class="header-version" title="アプリのバージョン"></span>
+    <button id="btn-refresh-filter-sort" class="refresh-fs-btn"
+            title="並び替え結果とフィルタ設定の条件合致探索を、いまの最新データで再評価します">
+      <span class="refresh-fs-icon">⟳</span>
+      <span class="refresh-fs-label">並び替えやフィルタ設定で最新状態に更新</span>
+    </button>
   </div>
   <div id="status-bar">
     <span id="status-indicator" class="status-dot offline"></span>
@@ -52,7 +58,10 @@
       <span class="cycle-timer-text" id="cycle-timer-text">0:00</span>
     </div>
     <span id="product-count" class="asin-badge">0 items</span>
+    <span id="last-cycle-time" class="cycle-time-badge hidden" title="直近 1 周期のクロール所要時間 (周期完了ごとに更新)">監視周期 : —</span>
+    <button id="btn-crawl-diagnostics" class="btn btn-secondary btn-sm" title="クロール診断: 1 ページ取得時間の推移とブロック発生位置を表示">📊 診断</button>
     <button id="btn-login" class="btn btn-secondary btn-sm" title="Sign in to Amazon — a logged-in session reduces CAPTCHA rate significantly">Login</button>
+    <button id="btn-logout" class="btn btn-secondary btn-sm hidden" title="Amazon からログアウト（別アカウントでログインしたい場合や、パスワード変更後の再ログイン時に使用）">ログアウト</button>
     <!-- Per spec: 「クロール開始ボタンをこの１つだけで大丈夫です」 —
          the only crawl Start/Stop button is the 監視スタート / 監視ストップ
          in the bulk toolbar below. The header keeps the status dot,
@@ -63,16 +72,33 @@
 <!-- ── Single Viewer view (no tab bar — spec is a single-view app) ── -->
 <section id="tab-products" class="main-view">
 
-  <!-- CAPTCHA banner (hidden by default) -->
-  <div id="captcha-banner" class="captcha-banner hidden">
-    <div class="captcha-banner-icon">🛑</div>
-    <div class="captcha-banner-body">
-      <div class="captcha-banner-title" id="captcha-banner-title">Verification required</div>
-      <div class="captcha-banner-reason" id="captcha-banner-reason"></div>
-      <div class="captcha-banner-countdown">Pause ends in <span id="captcha-countdown">0:00</span></div>
-    </div>
-    <div class="captcha-banner-actions">
-      <button id="captcha-solve-btn" class="btn btn-primary btn-sm">Solve</button>
+  <!-- ソフトボット (ロボット認証) 検知時のブロッキングモーダル (hidden by default).
+       Amazon のボット検知で商品ページの代わりに確認ページが返ると、監視を一時
+       停止してこのモーダルを表示し、①待つ(自動再開) ②再ログイン ③手動認証 の
+       3つの解決手段を案内する (2026-06 client要望)。 -->
+  <div id="captcha-modal" class="captcha-modal hidden">
+    <div class="captcha-modal-card">
+      <div class="captcha-modal-icon">🛑</div>
+      <h2 class="captcha-modal-title" id="captcha-modal-title">Amazonのアクセス確認により監視を一時停止しました</h2>
+      <div class="captcha-modal-reason" id="captcha-modal-reason"></div>
+      <p class="captcha-modal-desc">
+        現在、Amazon のボット検知により、商品ページの代わりに「確認ページ」が返されているため、
+        監視を一時停止しています。これはアプリの不具合ではなく Amazon 側の仕様です。
+        手動のブラウザでは表示できても、自動取得ではこの確認を通過できないことがあります。
+      </p>
+      <div class="captcha-modal-countdown">
+        あと <span id="captcha-modal-countdown">1:00</span> で自動的に監視を再開します
+      </div>
+      <div class="captcha-modal-actions">
+        <button id="captcha-modal-view" class="btn btn-primary">Amazonが返したページを確認</button>
+        <button id="captcha-modal-login" class="btn btn-secondary">Amazonにサインインして解除</button>
+      </div>
+      <ul class="captcha-modal-help">
+        <li>①「Amazonが返したページを確認」を押すと、スクレイパーが実際に受け取ったページ（同じ通信・同じまとめ検索）を表示します。商品一覧か確認ページかをご自身の目で確認できます。</li>
+        <li>② そのままお待ちいただくと、自動的に解除され監視を再開します（再開後はこの画面が閉じ、通常の監視画面に戻ります）。</li>
+        <li>③「Amazonにサインインして解除」でセッションを更新すると、すぐに再開できます。</li>
+        <li>④ 繰り返しブロックされる場合は、待機時間が段階的に長くなります（1→3→5→10分）。</li>
+      </ul>
     </div>
   </div>
 
@@ -140,6 +166,84 @@
   <div id="product-list-header">
     <span id="product-list-count">0 items</span>
     <input type="text" id="product-search" placeholder="Search ASIN or title…">
+    <!-- 並び替え (2026-05): 14 ソートキー + 方向ボタン。
+         「実質価格」「平均実質価格 N日」は下落率(%)、それ以外は値そのもの。
+         drop_* キーを選んだ瞬間は ensureStatsLoaded() が走り、全候補の
+         statsCache を一括取得してから applySort が走る。 -->
+    <div id="sort-controls">
+      <select id="sort-selector" title="並び替え基準">
+        <option value="">並び替えなし</option>
+        <optgroup label="日時">
+          <option value="added_at">登録日時</option>
+          <option value="last_observed_at">最新取得日時</option>
+        </optgroup>
+        <optgroup label="通知履歴">
+          <option value="notify_last">最新通知日時</option>
+          <option value="notify_count">通知ヒット総回数</option>
+          <option value="notify_gap">通知なし経過日数</option>
+        </optgroup>
+        <optgroup label="価格・ポイント">
+          <option value="price">BuyBox価格</option>
+          <option value="points">ポイント</option>
+          <option value="shipping_fee">送料</option>
+          <option value="mp_price">他の出品価格</option>
+        </optgroup>
+        <optgroup label="下落率(%)">
+          <option value="drop_instant">実質価格 (瞬間 vs 1つ前)</option>
+          <option value="drop_1d">平均実質価格 1日</option>
+          <option value="drop_7d">平均実質価格 7日</option>
+          <option value="drop_30d">平均実質価格 30日</option>
+          <option value="drop_90d">平均実質価格 90日</option>
+          <option value="drop_180d">平均実質価格 180日</option>
+        </optgroup>
+        <optgroup label="その他">
+          <option value="mp_count">全出品数 (内訳)</option>
+          <option value="monthly_sales">月間販売数</option>
+        </optgroup>
+        <optgroup label="FBA利益額">
+          <option value="profit_amt_instant">FBA利益額 (瞬間)</option>
+          <option value="profit_amt_1d">FBA利益額 (1日平均)</option>
+          <option value="profit_amt_7d">FBA利益額 (7日平均)</option>
+          <option value="profit_amt_30d">FBA利益額 (30日平均)</option>
+          <option value="profit_amt_90d">FBA利益額 (90日平均)</option>
+          <option value="profit_amt_180d">FBA利益額 (180日平均)</option>
+        </optgroup>
+        <optgroup label="ROE利益率">
+          <option value="profit_roe_instant">ROE利益率 (瞬間)</option>
+          <option value="profit_roe_1d">ROE利益率 (1日平均)</option>
+          <option value="profit_roe_7d">ROE利益率 (7日平均)</option>
+          <option value="profit_roe_30d">ROE利益率 (30日平均)</option>
+          <option value="profit_roe_90d">ROE利益率 (90日平均)</option>
+          <option value="profit_roe_180d">ROE利益率 (180日平均)</option>
+        </optgroup>
+        <optgroup label="Ama本体">
+          <option value="amazon_current">Ama本体価格</option>
+          <option value="amazon_ratio">Ama本体出品割合 (直近30日)</option>
+        </optgroup>
+        <optgroup label="インポート / 手数料">
+          <option value="imp_sellers">新品出品数 (取込)</option>
+          <option value="imp_rank">ランキング (取込)</option>
+          <option value="imp_rank_drop_30d">30日ランク変動 (取込)</option>
+          <option value="size_kubun">サイズ区分</option>
+          <option value="amazon_fee">Amazon販売手数料</option>
+          <option value="fba_fee">FBA販売手数料</option>
+          <option value="inventory_storage_fee">在庫保管料</option>
+        </optgroup>
+      </select>
+      <!-- 方向は2ボタン: ▲=高い順(降順) / ▼=低い順(昇順)。押した方が選択され
+           ハイライト。並び替えなし時は両方 disabled。ツールチップはキー依存
+           (高い順/低い順・新しい順/古い順・多い順/少ない順) で更新する。 -->
+      <div id="sort-dir-group">
+        <button id="sort-dir-desc" type="button" class="sort-arrow"
+                data-dir="desc" title="高い順" disabled>▲</button>
+        <button id="sort-dir-asc" type="button" class="sort-arrow"
+                data-dir="asc" title="低い順" disabled>▼</button>
+      </div>
+    </div>
+    <!-- 列配置初期化 (項目5): 列ヘッダーをドラッグして並び替えた列順を
+         デフォルトに戻す。固定列 (チェック/グループ/最新取得日時) は対象外。 -->
+    <button id="btn-reset-columns" class="btn btn-secondary btn-sm"
+            title="ドラッグで変更した列の並びをデフォルトに戻します（固定列を除く）">列配置初期化</button>
   </div>
 
   <!-- Tabular viewer — CSS-Grid based.
@@ -206,6 +310,10 @@
         <div class="chart-container chart-container-price">
           <div class="chart-row-toolbar">
             <span class="chart-row-label">価格 [円]</span>
+            <label class="chart-autorange" title="最大値はデータから自動計算したまま、最小値を 0 に固定、メモリ間隔は 10 個">
+              <input type="checkbox" id="chart-minzero-price" checked>
+              <span>最小値ゼロ</span>
+            </label>
             <label class="chart-autorange">
               <input type="checkbox" id="chart-autorange-price" checked>
               <span>オートレンジ</span>
@@ -216,6 +324,10 @@
         <div class="chart-container chart-container-count">
           <div class="chart-row-toolbar">
             <span class="chart-row-label">出品者数 [人]</span>
+            <label class="chart-autorange" title="最大値はデータから自動計算したまま、最小値を 0 に固定、メモリ間隔は 10 個">
+              <input type="checkbox" id="chart-minzero-count" checked>
+              <span>最小値ゼロ</span>
+            </label>
             <label class="chart-autorange">
               <input type="checkbox" id="chart-autorange-count" checked>
               <span>オートレンジ</span>
@@ -249,6 +361,30 @@
               <div class="chart-legend-value" data-value="otherSellers">—</div>
             </div>
           </div>
+
+          <!-- Ama本体価格 (項目14) — CSV/Keepa 取得時のみ記録される疎な
+               オレンジのドット系列。値は最新の取得値を表示。 -->
+          <div class="chart-legend-row" data-static="amazon">
+            <span class="chart-legend-marker" style="--dot:#FF9900">●</span>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">Ama本体価格</div>
+              <div class="chart-legend-sub">(CSV/Keepa取得時のみ)</div>
+              <div class="chart-legend-value" data-value="amazon">—</div>
+            </div>
+          </div>
+
+          <!-- 月間販売数 — Amazon の「過去1か月で○○点以上購入されました」
+               表記から取得した目安値。チャートにはプロットしないため
+               マーカーは付けず、スカラ値として表示する。 -->
+          <div class="chart-legend-row chart-legend-stat" data-static="monthlySales">
+            <span class="chart-legend-marker chart-legend-icon" aria-hidden="true">🛒</span>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">月間販売数</div>
+              <div class="chart-legend-sub">(Amazon表記・過去1か月)</div>
+              <div class="chart-legend-value" data-value="monthlySales">—</div>
+            </div>
+          </div>
+
           <div class="chart-legend-section-title">平均期間 (1つ選択)</div>
           <label class="chart-legend-row chart-legend-radio" data-avg="avg1d">
             <input type="radio" name="chart-avg" value="avg1d">
@@ -297,6 +433,15 @@
               <div class="chart-legend-value" data-value="sellerCount">—</div>
             </div>
           </div>
+          <!-- 新品出品数(取込) (項目9) — 最新1点のみ出品者数グラフにプロット。 -->
+          <div class="chart-legend-row" data-static="impSellers">
+            <span class="chart-legend-marker" style="--dot:#34d399">◆</span>
+            <div class="chart-legend-text">
+              <div class="chart-legend-label">新品出品数(取込)</div>
+              <div class="chart-legend-sub">(最新1点のみ)</div>
+              <div class="chart-legend-value" data-value="impSellers">—</div>
+            </div>
+          </div>
         </div>
 
         <div class="chart-period-box">
@@ -305,7 +450,7 @@
           <label class="chart-period-row"><input type="radio" name="chart-period" value="1w" checked><span>直近7日</span></label>
           <label class="chart-period-row"><input type="radio" name="chart-period" value="1m"><span>直近30日</span></label>
           <label class="chart-period-row"><input type="radio" name="chart-period" value="3m"><span>直近90日</span></label>
-          <label class="chart-period-row"><input type="radio" name="chart-period" value="6m"><span>直近180日</span></label>
+          <!-- 直近180日 は項目27 (保持期間 180→90) で削除。 -->
           <label class="chart-period-row"><input type="radio" name="chart-period" value="all"><span>全期間</span></label>
         </div>
       </aside>
@@ -395,6 +540,7 @@
       <span class="fnm-modal-hint" id="fnm-modal-hint">
         「フィルタ実行」を押すと、左枠で✓を入れた各種条件を全て満たす商品のみ表示します。
       </span>
+      <button class="btn btn-primary btn-sm fnm-header-save" id="fnm-save-header">条件を保存</button>
       <button class="btn-link fnm-modal-close" id="fnm-close" aria-label="閉じる">×</button>
     </div>
     <div class="fnm-modal-body">
@@ -422,13 +568,8 @@
             <button class="btn btn-ghost btn-sm" id="fnm-reset">リセット</button>
           </div>
 
-          <!-- 出品者数 ranges -->
-          <div class="fnm-section">
-            <div class="fnm-section-title">出品者数</div>
-            <div class="fnm-mpcount-grid" id="fnm-mpcount-grid">
-              <!-- populated by renderer: 5 rows × {checkbox, label, min, ~, max, 人} -->
-            </div>
-          </div>
+          <!-- 全出品数(内訳) のフィルタ5項目は 2026-06 spec 項目17 で撤去。
+               評価ロジックも無効化済み (renderer passesAllConditions / fnm-eval)。 -->
 
           <!-- 下落率 ranges (実質BuyBox価格) -->
           <div class="fnm-section">
@@ -438,6 +579,18 @@
             </div>
             <div class="fnm-droprate-grid" id="fnm-droprate-grid">
               <!-- populated by renderer: 6 rows × {checkbox, label, min ~ max, %} + formula sub-label -->
+            </div>
+          </div>
+
+          <!-- 範囲フィルタ (2026-06 client spec) -->
+          <div class="fnm-section">
+            <div class="fnm-section-title">範囲フィルタ (絶対値)</div>
+            <div class="fnm-section-hint">
+              登録日時・最新取得日時・各種価格・月間販売数の絶対値で絞り込みます。日時は日付ピッカーで指定。価格・個数は数値で指定。
+              ※ 30日間ランキング変動数・ランキング・利益額・利益率は別途実装予定。
+            </div>
+            <div class="fnm-ranges-grid" id="fnm-ranges-grid">
+              <!-- populated by renderer: 12 rows × {checkbox, label, min ~ max, suffix} -->
             </div>
           </div>
 
@@ -498,6 +651,22 @@
         <div id="discord-status" class="hidden"></div>
       </div>
 
+      <!-- Keepa API キー — インポート情報の定期自動更新 (spec 項目8) に
+           使用する app レベル設定。Discord webhook と同じく settings テーブル
+           (key: keepaApiKey) に保存する。キーは伏せ字入力。 -->
+      <div id="fnm-keepa-section" class="fnm-discord-section">
+        <div class="fnm-section-title">Keepa API キー
+          <span class="fnm-section-hint">（取込情報の定期自動更新に使用）</span>
+        </div>
+        <input type="password" id="keepa-api-key" autocomplete="off" placeholder="Keepa の API キーを入力">
+        <div class="btn-row">
+          <button id="btn-save-keepa" class="btn btn-primary btn-sm">キー保存</button>
+          <button id="btn-toggle-keepa" type="button" class="btn btn-secondary btn-sm">表示</button>
+          <button id="btn-keepa-refresh-now" type="button" class="btn btn-secondary btn-sm">今すぐ更新</button>
+        </div>
+        <div id="keepa-status" class="hidden"></div>
+      </div>
+
       <div class="fnm-footer-actions">
         <button id="fnm-save" class="btn btn-primary">条件を保存</button>
       </div>
@@ -519,6 +688,59 @@
   </div>
 </div>
 
+<!-- ── 通知価格の一括設定 modal (2026-05) ──────────────────────
+     ✅ した商品の bulk-action「通知価格の設定」から開く。2 種類の
+     計算方式から選んで、入力された % 値を元に各商品の notify_price
+     を一括更新する。 -->
+<div id="notify-price-set-modal" class="generic-modal hidden">
+  <div class="generic-modal-card" style="max-width:520px">
+    <div class="generic-modal-header">
+      <span>通知価格の一括設定</span>
+      <button class="btn-link" id="notify-price-set-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <div class="notify-set-summary" id="notify-set-summary">— 件選択中</div>
+      <label class="notify-set-option">
+        <input type="radio" name="notify-set-mode" value="effective-drop-pct" checked>
+        <span>✅した商品の <strong>最新実質</strong> BuyBox 価格から
+          <input type="number" class="notify-set-val" data-mode="effective-drop-pct" min="1" max="99" step="1" value="20">
+          ％下落した通知価格に一括設定</span>
+      </label>
+      <label class="notify-set-option">
+        <input type="radio" name="notify-set-mode" value="profit-margin">
+        <span>✅した商品の利益率が
+          <input type="number" class="notify-set-val" data-mode="profit-margin" min="1" max="99" step="1" value="30">
+          ％以上となる通知価格に一括設定</span>
+      </label>
+      <div class="notify-set-actions">
+        <button id="notify-set-execute" class="btn btn-primary btn-sm">実行</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 通知価格のリセット modal (2026-05) ────────────────────── -->
+<div id="notify-price-reset-modal" class="generic-modal hidden">
+  <div class="generic-modal-card" style="max-width:480px">
+    <div class="generic-modal-header">
+      <span>通知価格のリセット</span>
+      <button class="btn-link" id="notify-price-reset-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <div class="notify-reset-summary" id="notify-reset-summary">— 件選択中</div>
+      <p class="notify-reset-text">
+        ✅した商品の通知価格を全てリセットします。<br>
+        リセットされた商品は通知価格の列が空白となり、商品個別の通知価格
+        設定は無くなり、カスタムフィルタの通知設定のみでしか通知されなく
+        なります。
+      </p>
+      <div class="notify-set-actions">
+        <button id="notify-reset-execute" class="btn btn-warn btn-sm">実行</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── 通知履歴 modal ─────────────────────────────────────────── -->
 <div id="history-modal" class="generic-modal hidden">
   <div class="generic-modal-card" style="max-width:560px">
@@ -529,6 +751,81 @@
     <div class="generic-modal-body">
       <div id="notification-list" class="list-container"></div>
     </div>
+  </div>
+</div>
+
+<!-- ── クロール診断 modal ─────────────────────────────────────────
+     ヘッダーの「📊 診断」ボタンから開く。1 ページ取得時間の折れ線
+     グラフ + Amazon bot 検出 (CAPTCHA/429 等) 発生位置の縦線マーカー。
+     データは過去 24h を既定で表示、上部のセレクタで切替。 -->
+<div id="crawl-diagnostics-modal" class="generic-modal hidden">
+  <div class="generic-modal-card" style="max-width:880px">
+    <div class="generic-modal-header">
+      <span>クロール診断 — 1 ページ取得時間とブロック発生位置</span>
+      <button class="btn-link" id="crawl-diagnostics-close">×</button>
+    </div>
+    <div class="generic-modal-body">
+      <div class="crawl-diag-toolbar">
+        <label>期間:
+          <select id="crawl-diag-range">
+            <option value="3600000">直近 1 時間</option>
+            <option value="21600000">直近 6 時間</option>
+            <option value="86400000" selected>直近 24 時間</option>
+            <option value="259200000">直近 3 日</option>
+            <option value="604800000">直近 7 日</option>
+          </select>
+        </label>
+        <button id="crawl-diag-refresh" class="btn btn-secondary btn-sm">🔄 更新</button>
+        <div class="crawl-diag-legend">
+          <span class="cd-legend-line">— 1 ページ取得時間</span>
+          <span class="cd-legend-marker">▎ ブロック発生</span>
+        </div>
+      </div>
+      <div class="crawl-diag-section-title">▼ 1 ページ取得時間</div>
+      <div id="crawl-diag-summary" class="crawl-diag-summary">読み込み中…</div>
+      <div class="crawl-diag-chart-wrap">
+        <canvas id="crawl-diag-canvas" width="820" height="280"></canvas>
+        <div id="crawl-diag-empty" class="crawl-diag-empty hidden">表示するデータがありません</div>
+      </div>
+
+      <div class="crawl-diag-section-title">▼ 1 周期合計時間 (全商品スクレイプ完了まで)</div>
+      <div id="crawl-diag-cycle-summary" class="crawl-diag-summary">読み込み中…</div>
+      <div class="crawl-diag-chart-wrap">
+        <canvas id="crawl-diag-cycle-canvas" width="820" height="220"></canvas>
+        <div id="crawl-diag-cycle-empty" class="crawl-diag-empty hidden">表示するデータがありません</div>
+      </div>
+
+      <div class="crawl-diag-section-title">▼ ブロック発生履歴</div>
+      <div id="crawl-diag-blocks-list" class="crawl-diag-blocks"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 左下のログドック (2026-06 client要望): アプリ内で起きるイベントを常時表示する
+     小型ログ盤。最小化=アイコンのみ / 最大化=左下に小型ダッシュボード。
+     サイズはアプリ(ビューポート)を超えないよう CSS で上限を設ける。
+     データは app-log.js のリングバッファを getAppLog で取得。 -->
+<div id="log-dock" class="log-dock collapsed">
+  <button id="log-dock-icon" class="log-dock-icon" title="アプリ内ログを開く" aria-label="アプリ内ログを開く">📜</button>
+  <div class="log-dock-panel" role="dialog" aria-label="アプリ内ログ">
+    <div class="log-dock-header">
+      <span class="log-dock-title">📜 ログ</span>
+      <div class="log-dock-header-actions">
+        <button id="log-dock-refresh" class="log-dock-btn" title="更新">🔄</button>
+        <button id="log-dock-min" class="log-dock-btn" title="最小化">▁</button>
+      </div>
+    </div>
+    <div id="log-dock-list" class="log-dock-list">読み込み中…</div>
+  </div>
+</div>
+
+<!-- 値の再計算中に表示する全画面ブロッキングスピナー (2026-06 client要望)。
+     表示中はオーバーレイが全面を覆ってクリックを遮断し、他の操作をできなくする。
+     チャンク分割取得で main が固まらないため、このスピナーは止まらず回り続ける。 -->
+<div id="recalc-overlay" class="recalc-overlay hidden" aria-hidden="true">
+  <div class="recalc-box">
+    <div class="recalc-spinner"></div>
+    <div class="recalc-label">最新情報に更新中…</div>
   </div>
 </div>
 
