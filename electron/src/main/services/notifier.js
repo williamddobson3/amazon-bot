@@ -2,6 +2,7 @@
 
 const { getSetting, insertNotification } = require('../db/queries');
 const { renderChartImage } = require('./chart-image');
+const { pickMonthlySales, formatSalesCountLine } = require('../../shared/monthly-sales');
 
 // In-memory queue, flushed in batches of 5 every 2 s (matches the
 // Discord rate limit of 5 requests per 2 seconds per webhook).
@@ -221,10 +222,10 @@ function buildStatsTableAnsi(stats, latestEff, product) {
 //     詳細リンク (タイトル省略時のみ)
 //     🔗 [サイト比較①](Keepa) [サイト比較②](Amazon)　ASIN `BXXXXXXXXX`
 //     ```ansi  価格表 (平均価格/下落率/ROE利益率 × 最新/1日/7日/30日/90日/180日)  ```
+//     ```ansi 💰 FBA利益額(ROE利益率) : ¥X（X％）```  ← 先頭・数値は赤字 (30日平均ベース)
 //     🛒 **最新価格** : ¥X (=X円-Xpt+送料X円)
-//     💰 **FBA利益額(ROE利益率)** : ¥X（X％）   ← 30日平均ベース
+//     📊 **月間売行き個数** : +X個 ← 月間販売数 優先 (「+」付与)、無ければ 30日ランク変動(取込) (「+」なし)
 //     👥 **新品出品者数** : X人   ← 新品出品数(取込) 優先、無ければ 全出品数(内訳)
-//     📊 **月間売行き個数** : X個  ← 30日ランク変動(取込) 優先、無ければ 月間販売数
 //     📦 **発送情報** : ...
 //   ]
 //   [Image     : アプリ生成チャート PNG — 価格表(+利益額/利益率) + 2 グラフを内包]
@@ -306,13 +307,11 @@ async function sendDiscordNotification(webhookUrl, notif) {
     : (product.last_mp_count != null ? product.last_mp_count : null);
   const sellerLine = (newSellerCount != null) ? `${newSellerCount}人` : '—';
 
-  // 月間売行き個数 (項目13): 30日ランク変動(取込) を優先、無ければ 月間販売数
-  // (= 監視値 last_monthly_sales 優先、無ければ取込 imp_monthly_sales)。
-  const monthlySales = (product.last_monthly_sales != null)
-    ? product.last_monthly_sales
-    : (product.imp_monthly_sales != null ? product.imp_monthly_sales : null);
-  const salesCount = (product.imp_rank_drop_30d != null) ? product.imp_rank_drop_30d : monthlySales;
-  const salesLine  = (salesCount != null) ? `${salesCount}個` : '—';
+  // 月間売行き個数 (項目13 / 2026-06 改): 「月間販売数」(Amazon公表値、信頼性が
+  // 高い) を優先し「+」付き、無ければ「30日ランク変動(取込)」(Keepa推定値) を「+」
+  // なしで表示。詳細グラフ右パネルと共通の formatSalesCountLine を使用 (要表示一致)。
+  // 以前は 30日ランク変動 優先・「+」なし だったが、クライアント要望で優先度を反転。
+  const salesLine = formatSalesCountLine(product) ?? '—';
 
   const deliveryLine = product.last_delivery
                          ? ellipsize(product.last_delivery, 200)
@@ -335,10 +334,17 @@ async function sendDiscordNotification(webhookUrl, notif) {
   // 価格表 (平均価格 / 下落率 / ROE利益率、項目12)。stats が無いケースでも
   // buildStatsTableAnsi は「最新」行だけ値を出し、平均行は '—' になる。
   descParts.push(buildStatsTableAnsi(stats, effective, product));
+  // 並び順 (クライアント要望 2026-06): 💰FBA利益額 → 🛒最新価格 → 📊月間売行き個数 →
+  // 👥新品出品者数 → 📦発送情報。FBA利益額(ROE利益率) の数値は赤字にする。Discord で
+  // 文字色を付けられるのは ansi コードブロックのみなので、この 1 行だけ ansi 化する
+  // (1;31=太字赤 / 0=リセット)。利益が出せない (—) ときは色なし。
+  const profitColored = (profitLine === '—')
+    ? '💰 FBA利益額(ROE利益率) : —'
+    : `💰 FBA利益額(ROE利益率) : \x1b[1;31m${profitLine}\x1b[0m`;
+  descParts.push('```ansi\n' + profitColored + '\n```');
   descParts.push(`🛒 **最新価格** : ${priceLine}`);
-  descParts.push(`💰 **FBA利益額(ROE利益率)** : ${profitLine}`);
-  descParts.push(`👥 **新品出品者数** : ${sellerLine}`);
   descParts.push(`📊 **月間売行き個数** : ${salesLine}`);
+  descParts.push(`👥 **新品出品者数** : ${sellerLine}`);
   descParts.push(`📦 **発送情報** : ${deliveryLine}`);
 
   const description = descParts.join('\n');

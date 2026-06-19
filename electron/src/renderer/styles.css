@@ -1052,7 +1052,7 @@ select option { background: var(--bg2); }
   background: #2563eb;
   color: #ffffff;
 }
-/* 方向は2ボタン (▲=高い順/降順, ▼=低い順/昇順)。横並びでグループ化し、選択中
+/* 方向は2ボタン (▲=昇順/低い順, ▼=降順/高い順)。横並びでグループ化し、選択中
    (アクティブ) の方向だけオレンジでハイライトする。並び替えなし時は両方 disabled。 */
 #sort-dir-group {
   display: inline-flex;
@@ -2316,6 +2316,18 @@ select option { background: var(--bg2); }
   color: var(--text3);
   letter-spacing: 0;
   margin-top: 1px;
+}
+
+/* 可動列ヘッダーは主ラベルを1行目、薄字の補足 (.col-sub: 「(直近30日)」
+   「(取込)」「実質BuyBox」等) を必ず2行目へ折り返す。列幅が狭いと主ラベル＋
+   補足を横並びにした際に末尾が欠ける (例: 「Ama本体出品割合(直…」) ため、
+   ヘッダーセルを縦並び flex にして補足を改行する (2026-06 クライアント要望)。
+   固定列 (data-col 無し: チェック/グループ/日時) はチェックボックス等の横並びを
+   保つため対象外。主ラベル自体は nowrap のまま (1行目に収まる列幅で設計済み)。 */
+.viewer-row.viewer-header > div[data-col] {
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
 }
 
 /* 監視グラフ列のクリック可能なヘッダー — 期間切替ドロップダウンを開く。

@@ -230,14 +230,15 @@
           <option value="inventory_storage_fee">在庫保管料</option>
         </optgroup>
       </select>
-      <!-- 方向は2ボタン: ▲=高い順(降順) / ▼=低い順(昇順)。押した方が選択され
-           ハイライト。並び替えなし時は両方 disabled。ツールチップはキー依存
-           (高い順/低い順・新しい順/古い順・多い順/少ない順) で更新する。 -->
+      <!-- 方向は2ボタン: ▲=昇順(低い順) / ▼=降順(高い順)。矢印の向きと並び順を
+           一致させる (↑=昇順, ↓=降順)。押した方が選択されハイライト。並び替え
+           なし時は両方 disabled。ツールチップはキー依存 (高い順/低い順・新しい順/
+           古い順・多い順/少ない順) で更新する。 -->
       <div id="sort-dir-group">
-        <button id="sort-dir-desc" type="button" class="sort-arrow"
-                data-dir="desc" title="高い順" disabled>▲</button>
         <button id="sort-dir-asc" type="button" class="sort-arrow"
-                data-dir="asc" title="低い順" disabled>▼</button>
+                data-dir="asc" title="昇順" disabled>▲</button>
+        <button id="sort-dir-desc" type="button" class="sort-arrow"
+                data-dir="desc" title="降順" disabled>▼</button>
       </div>
     </div>
     <!-- 列配置初期化 (項目5): 列ヘッダーをドラッグして並び替えた列順を
@@ -373,14 +374,14 @@
             </div>
           </div>
 
-          <!-- 月間販売数 — Amazon の「過去1か月で○○点以上購入されました」
-               表記から取得した目安値。チャートにはプロットしないため
-               マーカーは付けず、スカラ値として表示する。 -->
+          <!-- 月間売行き個数 (項目B5) — 通知本文と同じロジック。月間販売数があれば
+               「+N個」(Amazon表記の○○以上)、無ければ 30日ランク変動(取込)を「N個」。
+               チャートにはプロットせずスカラ値として表示する。 -->
           <div class="chart-legend-row chart-legend-stat" data-static="monthlySales">
             <span class="chart-legend-marker chart-legend-icon" aria-hidden="true">🛒</span>
             <div class="chart-legend-text">
-              <div class="chart-legend-label">月間販売数</div>
-              <div class="chart-legend-sub">(Amazon表記・過去1か月)</div>
+              <div class="chart-legend-label">月間売行き個数</div>
+              <div class="chart-legend-sub">(月間販売数優先・無ければ30日ランク変動)</div>
               <div class="chart-legend-value" data-value="monthlySales">—</div>
             </div>
           </div>
@@ -527,8 +528,8 @@
      "left frame" of conditions:
        • 出品者数 ranges (現在 / 7日 / 30日 / 90日 / 180日 平均)
        • ASIN/商品名 keyword include + exclude (space=AND, 、=OR)
-     The filter tab additionally has a "right frame" with two preset
-     slots (おススメフィルタ ①②) and 14 user-defined custom slots
+     The filter tab additionally has a "right frame" with three preset
+     slots (おススメフィルタ ①②③) and 14 user-defined custom slots
      (カスタムフィルタ ①〜⑭). Save captures the left-frame state into
      a slot; 適用 reloads a slot back into the left frame.
      Context-aware: when the viewer is in trash mode, the middle tab
@@ -618,7 +619,7 @@
 
         <!-- RIGHT PANE — saved filter slots (only on filter tab) -->
         <div class="fnm-right-pane" id="fnm-right-pane">
-          <!-- おススメフィルタ presets (2 slots) -->
+          <!-- おススメフィルタ presets (3 slots: ①② 通知向け / ③ 自動ゴミ捨て向け) -->
           <div class="fnm-section">
             <div class="fnm-section-title">おススメフィルタ</div>
             <div class="fnm-section-hint">

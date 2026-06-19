@@ -137,6 +137,10 @@ function runMigrations(db) {
   // observations 側にも履歴として残す (将来のフィルタ条件用)。
   try { db.exec('ALTER TABLE products    ADD COLUMN last_monthly_sales INTEGER'); } catch {}
   try { db.exec('ALTER TABLE observations ADD COLUMN monthly_sales     INTEGER'); } catch {}
+  // 月間販売数を「実際に取得できた」最終日時 (ms、2026-06 spec 項目3)。監視クロール
+  // で非NULLの月間販売数を取れたサイクルだけ更新する。Keepa/CSV 取込側は imported_at
+  // を取得日時とし、両者のうち日時の新しい方を一覧/通知に表示する (pickMonthlySales)。
+  try { db.exec('ALTER TABLE products    ADD COLUMN last_monthly_sales_at INTEGER'); } catch {}
 
   // 通知履歴 UI で「いつ・どのフィルタが・どの商品にマッチしたか」を
   // 表示するために、ヒットした FNM カスタムフィルタスロットの名前と

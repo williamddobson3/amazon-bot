@@ -1,6 +1,7 @@
 'use strict';
 
 const { getDb, prepare, transaction } = require('./sqlite');
+const { pickMonthlySales, formatSalesCountLine } = require('../../shared/monthly-sales');
 
 // ── Products ────────────────────────────────────────────────
 
@@ -323,6 +324,10 @@ function updateProductAfterScrape(data) {
       -- 直近で取得できていた値を維持する。途中から取れなくなっても最後の
       -- 良い値を表示し続け、フィルタ/通知計算でも使えるようにするため。
       last_monthly_sales = COALESCE(?, last_monthly_sales),
+      -- 月間販売数を実際に取得できた (非NULL) サイクルだけ取得日時を更新する
+      -- (項目3)。取れなかったサイクルは旧値を維持 (= 最後に取れた日時のまま)。
+      -- これで Keepa取込値 (imported_at) と「取得日時の新しい方」を表示できる。
+      last_monthly_sales_at = CASE WHEN ? IS NOT NULL THEN ? ELSE last_monthly_sales_at END,
       last_shipping_fee  = ?,
       -- Amazon販売手数料は「最新BuyBox価格 × 最新紹介料% × 1.1」で価格更新の
       -- たびに再計算する (2026-06 client要望)。再計算値が null (紹介料%/価格が
@@ -344,6 +349,9 @@ function updateProductAfterScrape(data) {
     data.mpCount ?? null,
     data.mpCondition ?? null,
     data.monthlySales ?? null,
+    // last_monthly_sales_at CASE: WHEN ? IS NOT NULL THEN ?(observedAt)。
+    data.monthlySales ?? null,
+    data.observedAt,
     data.shippingFee ?? null,
     data.amazonFee ?? null,
     data.observedAt,
@@ -576,11 +584,9 @@ function getProductStats(asin, nowMs) {
   applyImportedAvg(90,  product.imp_buybox_90d);
   applyImportedAvg(180, product.imp_buybox_180d);
 
-  // 月間販売数 — 監視データ(last_monthly_sales)優先、無ければインポート値
-  // (imp_monthly_sales)。last_monthly_sales は updateProductAfterScrape の
-  // COALESCE により「直近で取得できていた値」を保持している。
-  result.monthlySalesEffective =
-    product.last_monthly_sales ?? product.imp_monthly_sales ?? null;
+  // 月間販売数 (項目3) — 監視クロール値と Keepa/CSV 取込値のうち、取得日時が
+  // 新しい方を採用する (pickMonthlySales)。一覧の月間販売数列・通知と同一ソース。
+  result.monthlySalesEffective = pickMonthlySales(product).value;
 
   // Other-sellers diff vs latest effective.
   if (result.otherSellersPrice != null && latestEffective != null) {
@@ -977,6 +983,7 @@ function getMonitoringChartData(asin, fromMs, toMs) {
   // 沿わなくなるため。
   let otherSellersOut = trim(otherSellers);
   let monthlySalesOut = null;
+  let salesLineOut    = null;
   let impSellersOut   = null;
   try {
     const product = getProduct(asin);
@@ -985,9 +992,11 @@ function getMonitoringChartData(asin, fromMs, toMs) {
       if (otherSellersOut.length === 0 && product.last_mp_price != null) {
         otherSellersOut = [{ t: toMs, v: product.last_mp_price }];
       }
-      // 「月間販売数」 — チャート右側パネルに表示する単一スカラ値。
-      // 系列ではなくレジェンド表示なので配列ではなく数値で返す。
-      monthlySalesOut = product.last_monthly_sales ?? null;
+      // 「月間売行き個数」 — チャート右側パネルのレジェンド表示文字列 (項目B5)。
+      // 通知本文と同じ formatSalesCountLine: 月間販売数(取得日時が新しい方)があれば
+      // 「+N個」、無ければ 30日ランク変動(取込) を「N個」、両方無ければ null→「—」。
+      monthlySalesOut = pickMonthlySales(product).value;   // 後方互換のため数値も維持
+      salesLineOut    = formatSalesCountLine(product);
       // 新品出品数(取込) (項目9) — 出品者数グラフに最新1点だけプロットする単一値。
       impSellersOut = product.imp_sellers ?? null;
     }
@@ -1018,6 +1027,7 @@ function getMonitoringChartData(asin, fromMs, toMs) {
     otherSellers: otherSellersOut,
     sellerCount:  trim(sellerCount),
     monthlySales: monthlySalesOut,
+    salesLine:    salesLineOut,          // 「月間売行き個数」表示文字列 (項目B5、通知と共通)
     impSellers:   impSellersOut,
     amazon:       amazonOut,
   };

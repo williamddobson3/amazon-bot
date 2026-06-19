@@ -160,9 +160,9 @@ async function refreshStatus() {
     if (status.paused) {
       text.textContent = 'Paused (CAPTCHA)';
     } else if (status.circuitBreaker && status.circuitBreaker.active) {
-      text.textContent = 'Scraping (reduced)';
+      text.textContent = 'Running (reduced)';
     } else {
-      text.textContent = `Scraping${status.restrictionCount != null ? ` (${status.restrictionCount} 件)` : ''}`;
+      text.textContent = `Running${status.restrictionCount != null ? ` (${status.restrictionCount} 件)` : ''}`;
     }
   } else {
     dot.className  = 'status-dot offline';
@@ -320,7 +320,7 @@ function setupProductControls() {
   });
 
   // 方向ボタン — desc/asc トグル。並び替えなし時は disabled。
-  // 方向は2ボタン (▲=高い順/降順, ▼=低い順/昇順)。トグルではなく、押した方の方向を
+  // 方向は2ボタン (▲=昇順/低い順, ▼=降順/高い順)。トグルではなく、押した方の方向を
   // 直接選択する。★ 同じ方向でも毎回再ソートする (2026-06 fix): 値が更新された後に
   // 押し直して並び順を最新化できるようにするため。以前は「既にその方向なら no-op」に
   // していたため、表示値が変わっても並び順が古いまま直せなかった。
@@ -932,8 +932,8 @@ const SORT_EXTRACTORS = {
   shipping_fee:      (p) => p.last_shipping_fee,
   mp_price:          (p) => p.last_mp_price,
   mp_count:          (p) => p.last_mp_count,
-  // 月間販売数 — 監視データ優先、無ければ Keepa インポート値 (表示と一致)。
-  monthly_sales:     (p) => p.last_monthly_sales ?? p.imp_monthly_sales,
+  // 月間販売数 — 監視/取込のうち取得日時が新しい方 (pickMonthlySales、項目3。表示と一致)。
+  monthly_sales:     (p) => pickMonthlySales(p),
   // ── Keepa インポート/計算列 (2026-06 spec 項目9) ──────────────────
   imp_sellers:           (p) => p.imp_sellers,
   imp_rank:              (p) => p.imp_rank,
@@ -1349,6 +1349,7 @@ async function recomputeFilterSnapshot(forceAll = true, quiet = false) {
     // で変化した(= statsCache が無効化された)商品だけ取り直す → 高速。変化していない
     // 商品はキャッシュ値で判定 (値が変わっていないので結果は同じ)。
     await ensureStatsLoaded(candidates, fnmStates, forceAll);
+    refreshNewestObserved();   // 「未取得期間」フィルタ (項目4) の基準を最新化してから評価
     const matched = new Set();
     for (const p of candidates) {
       if (passesAllConditions(p, fnmStates)) matched.add(p.asin);
@@ -1668,11 +1669,12 @@ const sparklineCharts = new WeakMap();        // canvas → Sparkline
 // 監視グラフ列の期間選択。列ヘッダーをクリックして 1日/7日/30日/
 // 90日/180日/全期間 を切り替えられる。null = 全期間。設定 key
 // `viewer.sparklineDays` に "1" / "7" / "30" / "90" / "180" / "all"
-// として永続化。
-let sparklineDays = 30;
+// として永続化。デフォルトは「直近7日」(クライアント要望 2026-06)。
+let sparklineDays = 7;
 // 縦軸最小値ゼロ固定 (項目24)。期間とは独立した ON/OFF。設定 key
-// `viewer.sparklineMinZero` ('1'/'0') に永続化。デフォルト OFF。
-let sparklineMinZero = false;
+// `viewer.sparklineMinZero` ('1'/'0') に永続化。デフォルト ON
+// (= 直近7日・ゼロ固定がデフォルト、クライアント要望 2026-06)。
+let sparklineMinZero = true;
 const SPARKLINE_PERIOD_OPTS = [
   { days: 1,    label: '直近1日'   },
   { days: 7,    label: '直近7日'   },
@@ -1977,14 +1979,30 @@ function groupCellInner(asin, groupName) {
     + `<button type="button" class="row-mini-btn row-group-add-btn" data-group-edit="${asin}" title="グループに登録">登録</button>`;
 }
 
-// 月間販売数の表示テキスト。監視データ(last_monthly_sales)優先、無ければ
-// インポート値(imp_monthly_sales)。Amazon 由来の監視値は「N+」(○○点以上)、
-// Keepa インポート値は実数なので「+」を付けない (2026-06 spec)。
+// 月間販売数の「最新取得値」を返す (2026-06 spec 項目3)。Amazon 監視クロール値
+// (last_monthly_sales / last_monthly_sales_at) と Keepa/CSV 取込値
+// (imp_monthly_sales / imported_at) のうち、値があって取得日時が新しい方。
+// ※ src/shared/monthly-sales.js の pickMonthlySales と同じロジック。main プロセス
+//   (queries.js / notifier.js) と一致させること (片方だけ変更しない)。
+function pickMonthlySales(row) {
+  if (!row) return null;
+  const liveVal = row.last_monthly_sales, liveTs = row.last_monthly_sales_at;
+  const impVal  = row.imp_monthly_sales,  impTs  = row.imported_at;
+  const liveHas = liveVal != null, impHas = impVal != null;
+  if (liveHas && impHas) return ((liveTs || 0) >= (impTs || 0)) ? liveVal : impVal;
+  if (liveHas) return liveVal;
+  if (impHas)  return impVal;
+  return null;
+}
+
+// 月間販売数の表示テキスト。pickMonthlySales が選んだ「最新取得値」(項目3)。
+// 監視値も Keepa monthlySold/CSV「先月の購入」も Amazon の「○○+ 買われました
+// (過去1か月)」という「○○以上」のまるめ値なので、値があれば常に末尾に「+」を
+// 付ける (例: 50→「50+」、100→「100+」)。
 function monthlySalesText(row) {
-  const live = row.last_monthly_sales;
-  const ms = (live != null) ? live : row.imp_monthly_sales;
+  const ms = pickMonthlySales(row);
   if (ms == null) return '';
-  return Number(ms).toLocaleString('ja-JP') + (live != null ? '+' : '');
+  return Number(ms).toLocaleString('ja-JP') + '+';
 }
 
 // ── 商品名 3行トランケート (client要望) ────────────────────────────────
@@ -3644,6 +3662,27 @@ const KEYWORD_ROWS = [
   { key: 'titleExclude', label: 'Amazon商品名キーワード除外検索' },
 ];
 
+// 「直近でデータ取得できなかった期間」フィルタ (2026-06 spec 項目4) の基準値。
+// 全商品の中で最も新しい last_observed_at (ms)。該当商品の last_observed_at が
+// この基準から何日古いか = 在庫切れ等で再取得できていない経過日数。グローバル
+// 集計なので per-row の extract には持たせず、評価パス直前に refreshNewestObserved()
+// で更新して staleDaysOf() が参照する (recomputeFilterSnapshot / flushDirty が呼ぶ)。
+// クロール停止中は基準も止まる = 経過日数は伸びない (クライアント定義どおり「相対」)。
+let newestObservedAt = 0;
+function refreshNewestObserved() {
+  let mx = 0;
+  for (const p of allProducts) {
+    const t = p.last_observed_at;
+    if (t != null && t > mx) mx = t;
+  }
+  newestObservedAt = mx;
+}
+function staleDaysOf(p) {
+  if (newestObservedAt <= 0 || !p || p.last_observed_at == null) return null;
+  const diff = newestObservedAt - p.last_observed_at;
+  return diff > 0 ? Math.floor(diff / 86_400_000) : 0;
+}
+
 // 範囲フィルタ (2026-06 client spec) — 絶対値の min/max 範囲指定。
 // `kind` がインプット種類 / 単位 / 値抽出方法を決める。
 //   - datetime: <input type="datetime-local">, ms timestamp で比較
@@ -3655,6 +3694,11 @@ const RANGE_ROWS = [
     extract: (p) => p.added_at },
   { key: 'lastObservedAt', label: '最新取得日時',                 kind: 'datetime', suffix: '',  step: '1',
     extract: (p) => p.last_observed_at },
+  // 直近でデータ取得できなかった期間 (項目4) — 全商品で最も新しい「最新取得日時」を
+  // 基準に、該当商品が何日古いか (在庫切れ等の未取得期間)。staleDaysOf がグローバル
+  // 基準 newestObservedAt を参照する (評価前に refreshNewestObserved() で更新済み)。
+  { key: 'staleDays',      label: '直近でデータ取得できなかった期間', kind: 'count',  suffix: '日', step: '1',
+    extract: (p) => staleDaysOf(p) },
   // 通知履歴 (2026-06 spec 項目29/30) — 最新通知日時 / 通知ヒット総回数 / 通知なし経過日数。
   { key: 'notifyLast',     label: '最新通知日時',                 kind: 'datetime', suffix: '',  step: '1',
     extract: (p) => p.last_notified_at },
@@ -3694,9 +3738,9 @@ const RANGE_ROWS = [
   { key: 'impRank',       label: 'ランキング(取込)',             kind: 'count',    suffix: '位', step: '1',
     extract: (p) => p.imp_rank },
   { key: 'monthlySales',   label: '月間販売数',                   kind: 'count',    suffix: '個', step: '1',
-    // 監視値(last_monthly_sales)優先、無ければ Keepa インポート値 (imp_monthly_sales)。
+    // 監視/取込のうち取得日時が新しい方 (pickMonthlySales、項目3)。
     // 表示(monthlySalesText)・並び替え(SORT_EXTRACTORS)と同一ソース (項目6)。
-    extract: (p) => p.last_monthly_sales ?? p.imp_monthly_sales },
+    extract: (p) => pickMonthlySales(p) },
   { key: 'impRankDrop',   label: '30日ランク変動(取込)',         kind: 'count',    suffix: '',  step: '1',
     extract: (p) => p.imp_rank_drop_30d },
   { key: 'impSellers',    label: '新品出品数(取込)',             kind: 'count',    suffix: '',  step: '1',
@@ -3759,41 +3803,74 @@ const DROP_RATE_FALLBACK = {
   d1:   ['avg1d',   'avgAll'],
 };
 
-// Hard-coded おススメフィルタ presets per v3 spec. These are NOT user-
-// editable — they're suggested condition sets the dev ships with the
-// app. Pressing 「適用」 copies the recommended state into the
-// left-pane filter; the user can then tweak and save to a custom slot.
-//   ① 瞬間 ≥ 15% AND 7日平均 ≥ 30% (substantial sustained drop)
-//   ② plus 180日平均 in (-40%, 0%)  (= 「平均より値上がってきている」 too,
-//      i.e., long-term up but recently dropping — value-buy candidates)
+// Hard-coded おススメフィルタ presets. These are NOT user-editable —
+// they're suggested condition sets the dev ships with the app. Pressing
+// 「適用」 copies the recommended state into the left-pane filter; the
+// user can then tweak and save to a custom slot. `notes` (配列) は ※
+// 注記で、カードに必ず表記する (クライアント要望 項目18)。
+//   ① 瞬間下落率 ≥1% + 30日ランク変動 ≥10 + 新品出品数 ≥2 + FBA利益額(7/30/90日) ≥100円
+//   ② ① から瞬間下落率を除いた版 (ランク・出品数・利益で絞る)
+//   ③ 自動ゴミ捨て用: 通知なし経過日数 ≥60日 (カスタム保存+自動ゴミ捨て推奨)
+// range キーは RANGE_ROWS と一致させること: 30日ランク変動=impRankDrop /
+// 新品出品数=impSellers / FBA利益額(N日平均)=profitAmt{7,30,90}d / 通知なし経過日数=notifyGap。
+const PROFIT_FILTER_RULES = [
+  { label: 'FBA利益額(7日平均)',  range: '100〜 円' },
+  { label: 'FBA利益額(30日平均)', range: '100〜 円' },
+  { label: 'FBA利益額(90日平均)', range: '100〜 円' },
+];
+const FBA_PROFIT_NOTE = '※FBA利益額(○○日平均)：○○日平均価格で売れた場合の利益';
+function buildProfitFilterRanges(s) {
+  s.ranges.profitAmt7d  = { enabled: true, min: 100, max: null };
+  s.ranges.profitAmt30d = { enabled: true, min: 100, max: null };
+  s.ranges.profitAmt90d = { enabled: true, min: 100, max: null };
+}
 const RECOMMENDED_PRESETS = [
   {
     name:  'おススメフィルタ①',
-    note:  null,
+    notes: [FBA_PROFIT_NOTE],
     rules: [
-      { label: '実質BuyBox価格の瞬間下落率',     range: '15〜 %' },
-      { label: '実質BuyBox価格の7日平均下落率',   range: '30〜 %' },
+      { label: '実質BuyBox価格の瞬間下落率', range: '1〜 %' },
+      { label: '30日ランク変動(取込)',       range: '10〜 個' },
+      { label: '新品出品数(取込)',           range: '2〜 人' },
+      ...PROFIT_FILTER_RULES,
     ],
     build: () => {
       const s = emptyFnmState();
-      s.dropRate.instant = { enabled: true, min: 15, max: null };
-      s.dropRate.d7      = { enabled: true, min: 30, max: null };
+      s.dropRate.instant   = { enabled: true, min: 1,  max: null };
+      s.ranges.impRankDrop = { enabled: true, min: 10, max: null };
+      s.ranges.impSellers  = { enabled: true, min: 2,  max: null };
+      buildProfitFilterRanges(s);
       return s;
     },
   },
   {
     name:  'おススメフィルタ②',
-    note:  '※ 180日下落率が −40〜0% = 平均より値上がってきている',
+    notes: [FBA_PROFIT_NOTE],
     rules: [
-      { label: '実質BuyBox価格の瞬間下落率',      range: '15〜 %' },
-      { label: '実質BuyBox価格の7日平均下落率',    range: '30〜 %' },
-      { label: '実質BuyBox価格の180日平均下落率',  range: '−40〜0 %' },
+      { label: '30日ランク変動(取込)', range: '10〜 個' },
+      { label: '新品出品数(取込)',     range: '2〜 人' },
+      ...PROFIT_FILTER_RULES,
     ],
     build: () => {
       const s = emptyFnmState();
-      s.dropRate.instant = { enabled: true, min: 15,  max: null };
-      s.dropRate.d7      = { enabled: true, min: 30,  max: null };
-      s.dropRate.d180    = { enabled: true, min: -40, max: 0    };
+      s.ranges.impRankDrop = { enabled: true, min: 10, max: null };
+      s.ranges.impSellers  = { enabled: true, min: 2,  max: null };
+      buildProfitFilterRanges(s);
+      return s;
+    },
+  },
+  {
+    name:  'おススメフィルタ③（自動ゴミ捨て）',
+    notes: [
+      '※通知なし経過日数：直近の通知日から現在までの経過日数',
+      '※カスタムフィルタに保存して自動ゴミ捨てを有効にすることを推奨',
+    ],
+    rules: [
+      { label: '通知なし経過日数', range: '60〜 日間' },
+    ],
+    build: () => {
+      const s = emptyFnmState();
+      s.ranges.notifyGap = { enabled: true, min: 60, max: null };
       return s;
     },
   },
@@ -4071,8 +4148,9 @@ function renderPresetSlots() {
         <span class="fnm-preset-rule-range">${escapeHtml(r.range)}</span>
       </li>
     `).join('');
-    const noteHtml = preset.note
-      ? `<div class="fnm-preset-note">${escapeHtml(preset.note)}</div>`
+    // ※ 注記は複数行可 (項目18) — 各行を独立した .fnm-preset-note で表記。
+    const noteHtml = Array.isArray(preset.notes)
+      ? preset.notes.map((n) => `<div class="fnm-preset-note">${escapeHtml(n)}</div>`).join('')
       : '';
     return `
       <div class="fnm-slot fnm-slot-preset">
@@ -4984,7 +5062,12 @@ function handleIncomingPriceUpdate(asin, data, updatedAt) {
     // 月間販売数は DB 側で COALESCE(?, last_monthly_sales) により直近の良い値を
     // 保持する仕様 (2026-06)。メモリキャッシュも同じく、値が取れた時だけ上書き
     // し、null では既存値を消さない (DB と表示の一時的な乖離を防ぐ)。
-    if (data.monthlySales != null) row.last_monthly_sales = data.monthlySales;
+    // 値が取れた時だけ上書き + 取得日時を更新 (項目3: 最新取得値判定用)。null
+    // では既存値も日時も消さない (DB の COALESCE / CASE と同じ「直近の良い値維持」)。
+    if (data.monthlySales != null) {
+      row.last_monthly_sales = data.monthlySales;
+      row.last_monthly_sales_at = updatedAt;
+    }
     row.last_shipping_fee = data.shippingFee ?? null;
     // Amazon販売手数料は main 側が「最新BuyBox価格 × 最新紹介料% × 1.1」で
     // 再計算して同梱する (2026-06 client要望)。価格に追従させるためメモリ値も
@@ -5036,6 +5119,11 @@ async function flushDirty() {
   // 監視している)。
   const asinsThisTick = Array.from(dirtyAsins);
   dirtyAsins.clear();
+
+  // 「未取得期間」フィルタ (項目4) を通知判定でも使えるよう、基準 (全商品で最も
+  // 新しい最新取得日時) をこのティックの先頭で最新化する。passesAllConditions 内の
+  // staleDaysOf がこれを参照する。
+  refreshNewestObserved();
 
   for (const asin of asinsThisTick) {
     const idx = productIndex.get(asin);
@@ -5952,8 +6040,6 @@ function updateLegendValues(data) {
   };
   const yen = (v) => `¥${Math.round(v).toLocaleString()}`;
   const num = (v) => `${Math.round(v)} 人`;
-  // 月間販売数は「Amazon 表記 = ○○以上」なので末尾に + を付ける。
-  const salesFmt = (v) => `${Math.round(v).toLocaleString('ja-JP')}+`;
   const last = (arr) => (Array.isArray(arr) && arr.length > 0)
     ? arr[arr.length - 1].v : null;
   set('effective',    last(data.effective),    yen);
@@ -5961,8 +6047,11 @@ function updateLegendValues(data) {
   set('amazon',       last(data.amazon),       yen);   // Ama本体価格 (項目14)
   set('sellerCount',  last(data.sellerCount),  num);
   set('impSellers',   data.impSellers,         num);   // 新品出品数(取込) (項目9, スカラ)
-  // monthlySales は data 上ではスカラ (配列ではない) — last() を通さない。
-  set('monthlySales', data.monthlySales,       salesFmt);
+  // 月間売行き個数 (項目B5) — 通知本文と同じ整形済み文字列 (data.salesLine)。
+  // 月間販売数あり→「+N個」、無ければ 30日ランク変動(取込)→「N個」、両方無し→「—」。
+  // 整形は main 側 (formatSalesCountLine) で実施済みなので、そのまま表示する。
+  const salesEl = document.querySelector('[data-value="monthlySales"]');
+  if (salesEl) salesEl.textContent = data.salesLine || '—';
   for (const a of AVG_PERIODS) {
     set(a.key, last(data[a.key]), yen);
   }
