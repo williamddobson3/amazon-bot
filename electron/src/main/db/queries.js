@@ -1249,11 +1249,31 @@ function insertPageTiming({ recordedAt, cycle, page, totalPages, elapsedMs }) {
 }
 
 // `sinceMs` で範囲を指定。ヘッダーモーダルでは過去 24h 程度を想定。
-function getPageTimingsSince(sinceMs, limit = 5000) {
+//
+// B16 fix: 旧実装は `ORDER BY recorded_at ASC LIMIT 5000` で「最古 5000 件」を返して
+// いた。24h など 1 ページ取得が 5000 件を超える窓では直近のデータが丸ごと落ち、
+// オレンジ線が途中で切れて見えていた (6h は 5000 件未満なので全件出ていた)。
+// 修正: 窓内の件数が targetMax 以下ならそのまま全件、超える場合は「窓全体を等間隔で
+// 間引き (stride サンプリング)」して最大 targetMax 件返す。行番号は recorded_at の
+// 降順 (= 最新が rn=1) で振るため、最新の点は必ず含まれ、線が直近まで届く。
+function getPageTimingsSince(sinceMs, targetMax = 5000) {
+  const cols = 'recorded_at, cycle, page, total_pages, elapsed_ms';
+  const total = prepare(
+    'SELECT COUNT(*) AS c FROM page_timings WHERE recorded_at >= ?'
+  ).get(sinceMs).c;
+  if (total <= targetMax) {
+    return prepare(
+      `SELECT ${cols} FROM page_timings WHERE recorded_at >= ? ORDER BY recorded_at ASC`
+    ).all(sinceMs);
+  }
+  // 1 点 / stride 件。最新 (rn=1) を起点に等間隔で採り、窓全体を覆う。
+  const stride = Math.ceil(total / targetMax);
   return prepare(
-    'SELECT recorded_at, cycle, page, total_pages, elapsed_ms FROM page_timings ' +
-    'WHERE recorded_at >= ? ORDER BY recorded_at ASC LIMIT ?'
-  ).all(sinceMs, limit);
+    `SELECT ${cols} FROM (` +
+      `SELECT ${cols}, ROW_NUMBER() OVER (ORDER BY recorded_at DESC) AS rn ` +
+      'FROM page_timings WHERE recorded_at >= ?' +
+    ') WHERE (rn - 1) % ? = 0 ORDER BY recorded_at ASC'
+  ).all(sinceMs, stride);
 }
 
 // 古いタイミングデータを定期的に削除して肥大化を防ぐ。

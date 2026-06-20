@@ -382,11 +382,8 @@ function registerIpcHandlers() {
         if (callbacks.openCaptchaSolve) callbacks.openCaptchaSolve();
         return { ok: true };
 
-      // ブロックモーダルの「Amazonが返したページを確認」— スクレイパーと同じ
-      // セッションで検索URLを生取得し、返ってきたページをウィンドウで見せる。
-      case 'viewBlockedPage':
-        if (callbacks.viewBlockedPage) callbacks.viewBlockedPage();
-        return { ok: true };
+      // 「Amazonが返したページを確認」(生ページ表示) は B10 で撤去 — 検索URL/まとめ
+      // 検索が露出し内部アルゴリズム漏洩につながるため、IPC 経路ごと削除した。
 
       case 'getHealth': {
         const now = Date.now();

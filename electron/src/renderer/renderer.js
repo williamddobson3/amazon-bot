@@ -2362,7 +2362,7 @@ function renderEffectiveCell(tr, latestEff, prevEff) {
 // prodOverride: 監視クロール中の凍結商品 (手数料が凍結値) を渡すと、利益額/ROE を
 // その凍結商品 + 凍結 stats で計算する。省略時はライブ allProducts を引く。
 function updateRowStats(tr, stats, prodOverride) {
-  const renderAvg = (cellSel, val, diff) => {
+  const renderAvg = (cellSel, val, diff, flip) => {
     const cell = tr.querySelector(cellSel);
     if (!cell) return;
     if (val == null) {
@@ -2374,21 +2374,22 @@ function updateRowStats(tr, stats, prodOverride) {
     let diffHtml = '';
     let pctHtml  = '';
     if (diff != null) {
-      // 表示規約 (2026-05): 差額は「最新実質 − 基準値 (avg / 他の出品)」。
-      // 最新実質cell ([data-f="effective"]) と完全に同じ符号 / 色規則に
-      // 揃え、「最新が基準より下がった」=「マイナスかつ赤 (値崩れ)」、
-      // 「最新が基準より上がった」=「プラスかつ青 (割高)」と読めるよう
-      // にする。
-      //
-      // stats.avgNdDiff / otherSellersDiff は queries.js が「avg − latest」
-      // で出しているため、表示用にだけ符号を反転 (displayDiff = -diff)。
-      // 通知側 (notifier.js / chart-render.html) は元の diff をそのまま
-      // 使う仕様のため、IPC レイヤは触らない。
-      const displayDiff = -diff;
-      const cls  = displayDiff < 0 ? 'pos' : (displayDiff > 0 ? 'neg' : 'flat');
+      // stats.avgNdDiff / otherSellersDiff は queries.js が「基準値 − 最新実質」
+      // で出している。表示の符号規約:
+      //   flip=true (〇日平均, B15 client要望): その符号のまま表示する。
+      //     = 平均が最新実質より高ければ「+ かつ赤 (pos)」、低ければ「− かつ青 (neg)」。
+      //       通知の下落率と同じ向き (値が下がった = プラス = 赤)。
+      //   flip=false (他の出品): 従来どおり「最新 − 基準 (=-diff)」で表示。
+      // 通知側 (notifier.js / chart-render.html) は元の diff をそのまま使う仕様の
+      // ため、IPC レイヤ (queries.js) は触らない (表示専用の符号反転)。
+      const displayDiff = flip ? diff : -diff;
+      // 色: プラス→pos(赤) / マイナス→neg(青)。flip 無しは符号が逆なので色条件も逆。
+      const cls = flip
+        ? (displayDiff > 0 ? 'pos' : (displayDiff < 0 ? 'neg' : 'flat'))
+        : (displayDiff < 0 ? 'pos' : (displayDiff > 0 ? 'neg' : 'flat'));
       const sign = displayDiff > 0 ? '+' : '';
       diffHtml = `<span class="avg-diff ${cls}">${sign}${displayDiff}</span>`;
-      // % 表記も同じく「最新 − 基準」÷ 基準 × 100。
+      // % 表記も同じ符号・色で「displayDiff ÷ 基準 × 100」。
       if (val !== 0) {
         const pct  = (displayDiff / val) * 100;
         const rounded = Math.round(pct);
@@ -2399,12 +2400,13 @@ function updateRowStats(tr, stats, prodOverride) {
     cell.innerHTML =
       `<span class="avg-val">¥${Number(val).toLocaleString()}</span>${diffHtml}${pctHtml}`;
   };
-  renderAvg('[data-stat="avg1d"]',   stats.avg1d,   stats.avg1dDiff);
-  renderAvg('[data-stat="avg7d"]',   stats.avg7d,   stats.avg7dDiff);
-  renderAvg('[data-stat="avg30d"]',  stats.avg30d,  stats.avg30dDiff);
-  renderAvg('[data-stat="avg90d"]',  stats.avg90d,  stats.avg90dDiff);
-  renderAvg('[data-stat="avg180d"]', stats.avg180d, stats.avg180dDiff);
-  renderAvg('[data-stat="other"]',   stats.otherSellersPrice, stats.otherSellersDiff);
+  // 〇日平均 (B15): 符号反転 (平均>最新→赤字プラス)。他の出品は従来の符号を維持。
+  renderAvg('[data-stat="avg1d"]',   stats.avg1d,   stats.avg1dDiff,   true);
+  renderAvg('[data-stat="avg7d"]',   stats.avg7d,   stats.avg7dDiff,   true);
+  renderAvg('[data-stat="avg30d"]',  stats.avg30d,  stats.avg30dDiff,  true);
+  renderAvg('[data-stat="avg90d"]',  stats.avg90d,  stats.avg90dDiff,  true);
+  renderAvg('[data-stat="avg180d"]', stats.avg180d, stats.avg180dDiff, true);
+  renderAvg('[data-stat="other"]',   stats.otherSellersPrice, stats.otherSellersDiff, false);
 
   // Ama本体出品割合(直近30日) (2026-06 spec 項目15)。stats.amazonListingRatio30d は
   // 監視点 2 点未満のとき null (= ⑤「2点以上で表示」) → 「—」表示。
@@ -3300,6 +3302,9 @@ function emptyFnmState() {
       avgEff180d:     range(),
       monthlySales:   range(),
     },
+    // OR グループ (B9): ランキング/月間販売数/30日ランク変動 を「いずれか1つでも
+    // 合致で抽出」する OR 評価にするフラグ。既定 false (= 従来どおり AND)。
+    rankGroupOr: false,
     legacy: new Array(20).fill(null).map(() => ({ enabled: false, min: null, max: null })),
   };
 }
@@ -3438,15 +3443,28 @@ function passesAllConditions(product, state) {
   // 取り出して inRange で min/max チェック。値が null (= 未取得 / 未設定)
   // なら inRange が false を返すので、未確定の商品は条件失敗扱い。
   if (state.ranges) {
+    // OR グループ (B9): rankGroupOr が ON のとき、ランキング/月間販売数/30日ランク変動
+    // は「有効な条件のうち1つでも一致」で通過 (他の範囲条件は AND のまま)。
+    const orOn = !!state.rankGroupOr;
+    let grpEnabled = false, grpMatched = false;
     for (const row of RANGE_ROWS) {
       const r = state.ranges[row.key];
       if (!r || !r.enabled) continue;
       const v = row.extract(product, stats);
       // ⑤「空白含む」(Ama本体出品割合): 値が空白 (null = 2点未満) の商品も通す。
       // includeBlank 既定 true。明示 false のときだけ空白を除外 (= inRange false)。
-      if (row.includeBlankOpt && v == null && r.includeBlank !== false) continue;
-      if (!inRange(v, r)) return false;
+      const passes = (row.includeBlankOpt && v == null && r.includeBlank !== false)
+        ? true
+        : inRange(v, r);
+      if (orOn && RANK_OR_GROUP_KEYS.includes(row.key)) {
+        grpEnabled = true;
+        if (passes) grpMatched = true;
+      } else if (!passes) {
+        return false;
+      }
     }
+    // OR グループに有効条件があり、どれも一致しなければ除外。
+    if (orOn && grpEnabled && !grpMatched) return false;
   }
   if (Array.isArray(state.legacy)) {
     for (let i = 0; i < state.legacy.length; i++) {
@@ -3541,6 +3559,8 @@ function parseFnmState(raw) {
         }
       }
     }
+    // OR グループ (B9) — ランキング/月間販売数/30日ランク変動 の OR 評価フラグ。
+    out.rankGroupOr = !!data.rankGroupOr;
     if (Array.isArray(data.legacy)) {
       out.legacy = data.legacy.slice(0, 20).map((item) => ({
         enabled: !!(item && item.enabled),
@@ -3682,6 +3702,12 @@ function staleDaysOf(p) {
   const diff = newestObservedAt - p.last_observed_at;
   return diff > 0 ? Math.floor(diff / 86_400_000) : 0;
 }
+
+// 「いずれか一つの条件でも合致すれば抽出」OR グループ (2026-06 client B9)。
+// この3キー (ランキング(取込)/月間販売数/30日ランク変動(取込)) は通常 AND だが、
+// state.rankGroupOr が true のときは「有効な条件のうち1つでも一致すれば通過」の
+// OR 評価にする (他の範囲条件は従来どおり AND)。RANGE_ROWS 上で連続している前提。
+const RANK_OR_GROUP_KEYS = ['impRank', 'monthlySales', 'impRankDrop'];
 
 // 範囲フィルタ (2026-06 client spec) — 絶対値の min/max 範囲指定。
 // `kind` がインプット種類 / 単位 / 値抽出方法を決める。
@@ -4047,9 +4073,11 @@ function renderRangesGrid(state) {
   // グループ境界 (= 区切り線を入れる先頭 key) のセット。
   // 順序: 日時 → 価格 → 平均実質BuyBox → mp価格 → 月間販売数
   const groupStartKeys = new Set(['price', 'avgEff1d', 'mpPrice', 'impRank', 'profitAmtInstant', 'amazonFee']);
-  grid.innerHTML = RANGE_ROWS.map((row) => {
+  // 1 行分の HTML。OR グループ内の行はラッパ側に区切り線があるので group-start を付けない。
+  const rowHtml = (row) => {
     const r = ranges[row.key] || { enabled: false, min: null, max: null };
-    const grpCls = groupStartKeys.has(row.key) ? ' fnm-range-group-start' : '';
+    const grpCls = (groupStartKeys.has(row.key) && !RANK_OR_GROUP_KEYS.includes(row.key))
+      ? ' fnm-range-group-start' : '';
     const inputType = row.kind === 'datetime' ? 'datetime-local' : 'number';
     // 日時の場合は ms timestamp ⇔ "YYYY-MM-DDTHH:mm" 変換が必要。
     const minVal = row.kind === 'datetime' ? msToLocalDateTime(r.min) : (r.min ?? '');
@@ -4070,7 +4098,26 @@ function renderRangesGrid(state) {
         ${blankBox}
       </label>
     `;
-  }).join('');
+  };
+  // OR グループ (B9): ランキング/月間販売数/30日ランク変動 を ✅ボックス付きで囲む。
+  const orGroupHtml = () => `
+    <div class="fnm-or-group">
+      <label class="fnm-or-toggle" title="チェックすると、この3条件のいずれか1つでも合致した商品を抽出します">
+        <input type="checkbox" data-fnm-rank-or ${state.rankGroupOr ? 'checked' : ''}>
+        <span>いずれか一つの条件でも<br>合致すれば抽出する</span>
+      </label>
+      <div class="fnm-or-rows">
+        ${RANK_OR_GROUP_KEYS.map((k) => rowHtml(RANGE_ROWS.find((rr) => rr.key === k))).join('')}
+      </div>
+    </div>
+  `;
+  let html = '';
+  for (const row of RANGE_ROWS) {
+    if (row.key === RANK_OR_GROUP_KEYS[0]) { html += orGroupHtml(); continue; }  // 3行をまとめて描画
+    if (RANK_OR_GROUP_KEYS.includes(row.key)) continue;                          // 既に描画済み
+    html += rowHtml(row);
+  }
+  grid.innerHTML = html;
 }
 
 // ms timestamp → "YYYY-MM-DDTHH:mm" (datetime-local input value 形式)。
@@ -4264,6 +4311,9 @@ function captureFnmTabState() {
     }
     out.ranges[row.key] = entry;
   }
+  // OR グループ (B9) — 「いずれか一つの条件でも合致すれば抽出」チェックボックス。
+  const orCb = document.querySelector('[data-fnm-rank-or]');
+  out.rankGroupOr = !!(orCb && orCb.checked);
   // legacy
   out.legacy = new Array(20).fill(null).map(() => ({ enabled: false, min: null, max: null }));
   document.querySelectorAll('#fnm-cond-list input[type="checkbox"][data-fnm-idx]').forEach((cb) => {
@@ -4720,18 +4770,10 @@ function renderCrawlDiagnosticsSummary(data, rangeMs) {
     el.innerHTML = `この期間にクロールデータがありません (期間: ${formatRangeLabel(rangeMs)})`;
     return;
   }
-  const elapsed = t.map((r) => r.elapsed_ms);
-  const sum = elapsed.reduce((a, b) => a + b, 0);
-  const avg = sum / elapsed.length;
-  const max = Math.max(...elapsed);
-  const min = Math.min(...elapsed);
+  // B13: サンプル数 / 平均 / 最小 / 最大 の時間表記は削除し、期間とアクセス調整回数のみ。
   el.innerHTML =
     `期間: <strong>${formatRangeLabel(rangeMs)}</strong> | ` +
-    `サンプル数: <strong>${t.length}</strong> | ` +
-    `平均: <strong>${fmtDuration(avg)}</strong> | ` +
-    `最小: <strong>${fmtDuration(min)}</strong> | ` +
-    `最大: <strong>${fmtDuration(max)}</strong> | ` +
-    `ブロック発生: <strong>${b.length}</strong> 回`;
+    `アクセス調整回数: <strong>${b.length}</strong> 回`;
 }
 
 function fmtDuration(ms) {
@@ -4779,8 +4821,13 @@ function drawCrawlDiagnosticsChart(data, fromMs, toMs) {
   const plotW = cssW - pad.left - pad.right;
   const plotH = cssH - pad.top  - pad.bottom;
 
-  // Y 軸範囲 — elapsed_ms の最大に少し余白を持たせて切り上げ。
-  const maxMs = Math.max(...timings.map((t) => t.elapsed_ms), 1000);
+  // B14: 1ページ取得時間 ≒ 約45商品 ぶんなので、縦軸は切りの良い 50 で割って
+  // 「1商品あたりの取得時間」に換算して表示する (曲線の形は同じ、目盛りが /50)。
+  const PER_PAGE_PRODUCTS = 50;
+  const perProductMs = (t) => t.elapsed_ms / PER_PAGE_PRODUCTS;
+
+  // Y 軸範囲 — 1商品あたり時間の最大に少し余白を持たせて切り上げ。
+  const maxMs = Math.max(...timings.map(perProductMs), 20);
   const yMax  = niceCeil(maxMs * 1.1);
   const yMin  = 0;
 
@@ -4839,7 +4886,7 @@ function drawCrawlDiagnosticsChart(data, fromMs, toMs) {
   ctx.beginPath();
   for (let i = 0; i < timings.length; i++) {
     const x = xFor(timings[i].recorded_at);
-    const y = yFor(timings[i].elapsed_ms);
+    const y = yFor(perProductMs(timings[i]));
     if (i === 0) ctx.moveTo(x, y);
     else         ctx.lineTo(x, y);
   }
@@ -4851,7 +4898,7 @@ function drawCrawlDiagnosticsChart(data, fromMs, toMs) {
     ctx.fillStyle = '#ffa500';
     for (const t of timings) {
       const x = xFor(t.recorded_at);
-      const y = yFor(t.elapsed_ms);
+      const y = yFor(perProductMs(t));
       ctx.beginPath();
       ctx.arc(x, y, 1.8, 0, Math.PI * 2);
       ctx.fill();
@@ -5028,7 +5075,7 @@ function renderCrawlDiagnosticsBlockList(blocks) {
   const el = $('#crawl-diag-blocks-list');
   if (!el) return;
   if (!blocks || blocks.length === 0) {
-    el.innerHTML = '<div class="cd-block-empty">この期間にブロックイベントは発生していません</div>';
+    el.innerHTML = '<div class="cd-block-empty">この期間にアクセス調整イベントは発生していません</div>';
     return;
   }
   // 新しいものを上に。
@@ -5284,7 +5331,7 @@ function showCycleProgress(p) {
   const pct = p.total > 0 ? (p.done / p.total * 100) : 0;
   $('#cycle-progress-fg').style.strokeDashoffset = (100 - pct).toFixed(2);
   $('#cycle-progress-pct').textContent = `${Math.round(pct)}%`;
-  ring.title = `スクレイピング進捗 — wave ${p.wave || 1}`;
+  ring.title = `最新データ取得の進捗 — wave ${p.wave || 1}`;
 }
 
 function hideCycleProgress() {
@@ -5349,8 +5396,7 @@ function showCaptchaModal(p) {
   // 自動再開時刻: scheduler の blockedUntil 優先、無ければ pause 期限 / 既定10分。
   const fallback = Date.now() + 10 * 60 * 1000;
   captchaModalUntil = p.until || p.pausedUntil || captchaModalUntil || fallback;
-  const reasonEl = $('#captcha-modal-reason');
-  if (reasonEl && p.reason) reasonEl.textContent = p.reason;
+  // 理由テキスト (内部挙動の露出) は B10 で撤去 — p.reason は表示しない。
   const modal = $('#captcha-modal');
   if (modal) modal.classList.remove('hidden');
   captchaModalShown = true;
@@ -5364,7 +5410,7 @@ function updateCaptchaCountdown() {
   const el = $('#captcha-modal-countdown');
   if (!el) return;
   const rem = captchaModalUntil - Date.now();
-  if (rem <= 0) { el.textContent = '再開中…'; return; }
+  if (rem <= 0) { el.textContent = '0:00'; return; }
   const m = Math.floor(rem / 60000);
   const s = Math.ceil((rem % 60000) / 1000);
   el.textContent = `${m}:${String(s).padStart(2, '0')}`;
@@ -5511,21 +5557,15 @@ function setupSessionControls() {
 
   // ブロックモーダルの「Amazonにサインインして解除」— ログイン窓を開く。
   // main 側 onLoginSuccess がブロック中なら liftPause + resumeFromBlock する。
+  // 「Amazonにサインインしてアクセス可能な上限を拡大」(旧: サインインして解除)。
   const captchaLoginBtn = $('#captcha-modal-login');
   if (captchaLoginBtn) {
     captchaLoginBtn.addEventListener('click', () => {
       window.api.invoke('openLogin').catch((e) => console.warn('openLogin:', e));
     });
   }
-
-  // ブロックモーダルの「Amazonが返したページを確認」— スクレイパーが実際に
-  // 受け取った生ページをウィンドウで表示し、確認ページであることを目視確認できる。
-  const captchaViewBtn = $('#captcha-modal-view');
-  if (captchaViewBtn) {
-    captchaViewBtn.addEventListener('click', () => {
-      window.api.invoke('viewBlockedPage').catch((e) => console.warn('viewBlockedPage:', e));
-    });
-  }
+  // 「Amazonが返したページを確認」ボタンは B10 で撤去 (URL/まとめ検索が露出し
+  // 内部アルゴリズム漏洩につながるため)。viewBlockedPage を呼ぶ UI 経路は無し。
 }
 
 // ── Chart modal ─────────────────────────────────────────────

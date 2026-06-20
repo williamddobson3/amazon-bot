@@ -73,8 +73,21 @@ ok('2b FBA利益額 が先頭 (最新価格より前)', iProfit < iPrice);
 ok('2b 最新価格 < 月間売行き個数',        iPrice  < iSales);
 ok('2b 月間売行き個数 < 新品出品者数',    iSales  < iSeller);
 ok('2b 新品出品者数 < 発送情報',          iSeller < iDeliv);
-ok('2b FBA利益額の数値が赤字 (ansi 1;31)', notifierSrc.includes('\\x1b[1;31m${profitLine}\\x1b[0m'));
-ok('2b 利益が出せない時は色なし (—)', notifierSrc.includes("'💰 FBA利益額(ROE利益率) : —'"));
+// B17: 値は符号で着色 (プラス/0=赤 1;31、マイナス=青 1;34) — profitColor 変数経由。
+ok('B17 着色は profitColor 変数経由', notifierSrc.includes('${profitColor}${profitLine}\\x1b[0m'));
+ok('B17 マイナス=青(1;34)/プラス=赤(1;31) の選択',
+   notifierSrc.includes("const profitColor = (profitAmt != null && profitAmt < 0) ? '\\x1b[1;34m' : '\\x1b[1;31m';"));
+// 符号→色の写経検証。
+const profitColorFor = (amt) => (amt != null && amt < 0) ? '\x1b[1;34m' : '\x1b[1;31m';
+ok('B17 利益プラス → 赤(1;31)',     profitColorFor(225) === '\x1b[1;31m');
+ok('B17 利益ゼロ → 赤(1;31)',       profitColorFor(0) === '\x1b[1;31m');
+ok('B17 利益マイナス → 青(1;34)',   profitColorFor(-114) === '\x1b[1;34m');
+// B8: ラベル直後で改行 + 値は全角空白1個。利益が出せない (—) ときは色なし。
+ok('B8 ラベル直後で改行し値を2行目に',
+   notifierSrc.includes('💰 FBA利益額(ROE利益率)\\n　${profitColor}${profitLine}\\x1b[0m'));
+ok('B8 利益が出せない時も改行・色なし (—)',
+   notifierSrc.includes("'💰 FBA利益額(ROE利益率)\\n　—'"));
+ok('B8 （〇%）の前に全角空白1個', notifierSrc.includes('${fmtYen(amt)}　（${Math.round(roe)}％）'));
 
 // ── 項目3) updateProductAfterScrape の last_monthly_sales_at 更新 (SQL写経) ─────
 // 月間販売数が取れた (非NULL) サイクルだけ取得日時を更新。取れない (NULL) サイクルは

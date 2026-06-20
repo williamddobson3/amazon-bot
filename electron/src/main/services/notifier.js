@@ -114,9 +114,13 @@ const padR = (s, w) => s + ' '.repeat(Math.max(0, w - cellWidth(s)));
 const padL = (s, w) => ' '.repeat(Math.max(0, w - cellWidth(s))) + s;
 
 // 価格表 (embed テキスト用) を Discord ansi コードブロックで描画する。
-// v7 仕様 (2026-06 spec 項目12) — 「差額」列を撤去し「ROE利益率」列を追加:
-//   - 行ラベル : 最新 / 1日 / 7日 / 30日 / 90日 / 180日 (「平均」を削除)
-//   - 列見出し : 平均価格 / 下落率 / ROE利益率
+// v7 仕様 (2026-06 spec 項目12) — 「差額」列を撤去し「ROE利益率」列を追加。
+// v8 (2026-06 B7) — スマホで折り返さないよう、値は右揃えのワイド列をやめ
+//   「行ラベル : 平均価格、下落率、ROE利益率」を全角読点(、)区切りで左詰め表示:
+//     最新 : ¥569、0%、-59%
+//     1日  : ¥8511、133%、-9%   …
+//   - 行ラベル : 最新 / 1日 / 7日 / 30日 / 90日 / 180日 (コロン位置だけ揃える)
+//   - 列見出し : 平均価格、下落率、ROE利益率 (凡例、値は桁で揃えない)
 //   - 下落率    : 小数を四捨五入した整数 / 正値は + 無し / 負値は - / 0 は 0%
 //   - ROE利益率 : 利益額 ÷ 最新実質 × 100 を四捨五入 / 正値は + / 0 は 0%
 //   - 着色      : 下落率=下落の符号 (下落=赤/上昇=青)、ROE=利益の符号
@@ -184,29 +188,21 @@ function buildStatsTableAnsi(stats, latestEff, product) {
   const roeVals = rows.map((r) => roeOf(r.ref));
   const roeStrs = roeVals.map(fmtRoeStr);
 
+  // 行ラベルだけ幅を揃え (コロン位置を合わせる)、値は揃えない。
   const labelW = Math.max(...rows.map((r) => cellWidth(r.label)));
-  const valW   = Math.max(cellWidth('平均価格'),  ...valStrs.map(cellWidth));
-  const pctW   = Math.max(cellWidth('下落率'),    ...pctStrs.map(cellWidth));
-  const roeW   = Math.max(cellWidth('ROE利益率'), ...roeStrs.map(cellWidth));
 
+  // スマホ (Discord モバイル) で表が折り返さないよう、値は右揃えのワイド列では
+  // なく「左詰め + 全角読点(、)区切り」で出す (2026-06 client B7)。桁数で列幅を
+  // 揃えないので 1 行が短くなり改行されにくい。色は従来どおり (下落率=下落符号 /
+  // ROE=利益符号)。左詰めなので padding 不要 = 着色をそのまま値に適用してよい。
   const lines = [];
-  // ヘッダー行 — ラベル列ぶん (labelW + ':' + 1sp) の空白 + 3 カラム見出し。
-  lines.push(
-    padR('', labelW + 2) +
-    padL('平均価格', valW) + ' ' +
-    padL('下落率', pctW)   + ' ' +
-    padL('ROE利益率', roeW)
-  );
+  // 見出し行 — ラベル列ぶん (labelW + ':' + 1sp = labelW+2) の空白 + 凡例。
+  lines.push(padR('', labelW + 2) + '平均価格、下落率、ROE利益率');
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    const labelCol = padR(r.label, labelW) + ':';
-    const valCol   = padL(valStrs[i], valW);
-    const pctCol   = padL(pctStrs[i], pctW);
-    const roeCol   = padL(roeStrs[i], roeW);
-    // 下落率は下落符号 (diff) で、ROEは利益符号 (roe値) で着色。
-    lines.push(
-      `${labelCol} ${valCol} ${colorize(pctCol, r.diff)} ${colorize(roeCol, roeVals[i])}`
-    );
+    const pctCol = colorize(pctStrs[i], r.diff);
+    const roeCol = colorize(roeStrs[i], roeVals[i]);
+    lines.push(`${padR(r.label, labelW)}: ${valStrs[i]}、${pctCol}、${roeCol}`);
   }
 
   return '```ansi\n' + lines.join('\n') + '\n```';
@@ -222,7 +218,7 @@ function buildStatsTableAnsi(stats, latestEff, product) {
 //     詳細リンク (タイトル省略時のみ)
 //     🔗 [サイト比較①](Keepa) [サイト比較②](Amazon)　ASIN `BXXXXXXXXX`
 //     ```ansi  価格表 (平均価格/下落率/ROE利益率 × 最新/1日/7日/30日/90日/180日)  ```
-//     ```ansi 💰 FBA利益額(ROE利益率) : ¥X（X％）```  ← 先頭・数値は赤字 (30日平均ベース)
+//     ```ansi 💰 FBA利益額(ROE利益率) ⏎ 　¥X　（X％）```  ← 先頭・ラベル直後で改行・数値は赤字 (30日平均ベース)
 //     🛒 **最新価格** : ¥X (=X円-Xpt+送料X円)
 //     📊 **月間売行き個数** : +X個 ← 月間販売数 優先 (「+」付与)、無ければ 30日ランク変動(取込) (「+」なし)
 //     👥 **新品出品者数** : X人   ← 新品出品数(取込) 優先、無ければ 全出品数(内訳)
@@ -288,6 +284,7 @@ async function sendDiscordNotification(webhookUrl, notif) {
   // 場合は ref を stats.avg{N}d に差し替えるだけ。利益額 = 30日平均実質 − 最新実質
   // − Amazon − FBA − 在庫保管料、ROE = 利益額 ÷ 最新実質 × 100。
   let profitLine = '—';
+  let profitAmt  = null;        // 利益額 (符号で赤/青を切替、B17)。算出不能時は null。
   {
     const af = (product.amazon_fee != null) ? product.amazon_fee : null;
     const ff = (product.fba_fee != null) ? product.fba_fee : null;
@@ -297,7 +294,9 @@ async function sendDiscordNotification(webhookUrl, notif) {
         && af != null && ff != null && sf != null) {
       const amt = ref - effective - af - ff - sf;
       const roe = (amt / effective) * 100;
-      profitLine = `${fmtYen(amt)}（${Math.round(roe)}％）`;
+      profitAmt = amt;
+      // （〇%）の前に全角空白を1個入れる (2026-06 client B8)。
+      profitLine = `${fmtYen(amt)}　（${Math.round(roe)}％）`;
     }
   }
 
@@ -338,9 +337,13 @@ async function sendDiscordNotification(webhookUrl, notif) {
   // 👥新品出品者数 → 📦発送情報。FBA利益額(ROE利益率) の数値は赤字にする。Discord で
   // 文字色を付けられるのは ansi コードブロックのみなので、この 1 行だけ ansi 化する
   // (1;31=太字赤 / 0=リセット)。利益が出せない (—) ときは色なし。
+  // B8: ラベルの直後で改行し、値は全角空白1個 + 「¥…　（〇%）」を2行目に左詰め表示。
+  // B17: 利益がマイナスのときは青字、プラス(0含む)は赤字 — 価格表の ROE利益率 列と
+  // 同じ符号→色の規約 (プラス=赤 / マイナス=青) に揃える。1;=太字。
+  const profitColor = (profitAmt != null && profitAmt < 0) ? '\x1b[1;34m' : '\x1b[1;31m';
   const profitColored = (profitLine === '—')
-    ? '💰 FBA利益額(ROE利益率) : —'
-    : `💰 FBA利益額(ROE利益率) : \x1b[1;31m${profitLine}\x1b[0m`;
+    ? '💰 FBA利益額(ROE利益率)\n　—'
+    : `💰 FBA利益額(ROE利益率)\n　${profitColor}${profitLine}\x1b[0m`;
   descParts.push('```ansi\n' + profitColored + '\n```');
   descParts.push(`🛒 **最新価格** : ${priceLine}`);
   descParts.push(`📊 **月間売行き個数** : ${salesLine}`);

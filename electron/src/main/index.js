@@ -560,7 +560,8 @@ app.whenReady().then(async () => {
   setWindowCallbacks({
     openLogin: openLoginWindow,
     openCaptchaSolve: () => openCaptchaSolveWindow(lastCaptchaSolveUrl),
-    viewBlockedPage: showBlockedPageWindow,
+    // viewBlockedPage (生ページ表示) は B10 で撤去 — URL/まとめ検索の露出回避。
+    // showBlockedPageWindow は未参照のデッドコードとして残置 (呼び出し経路なし)。
   });
   createMainWindow();
   startRetentionSchedule();
